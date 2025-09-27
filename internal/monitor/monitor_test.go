@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/accursedgalaxy/insider-monitor/internal/price"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -195,6 +196,199 @@ func TestFormatTokenAmount(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result := formatTokenAmount(tt.amount, tt.decimals)
 			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestNewTokenInfo(t *testing.T) {
+	tokenAccountInfo := TokenAccountInfo{
+		Balance:     1000000000, // 1 token with 9 decimals
+		LastUpdated: time.Now(),
+		Symbol:      "TKN1",
+		Decimals:    9,
+	}
+
+	priceData := price.PriceData{
+		Price:           2.0,
+		LastUpdated:     time.Now(),
+		ConfidenceLevel: "high",
+	}
+
+	tokenInfo := NewTokenInfo("mint1", tokenAccountInfo, priceData, true)
+
+	assert.Equal(t, "mint1", tokenInfo.Mint)
+	assert.Equal(t, float64(1000000000), tokenInfo.Amount)
+	assert.Equal(t, 2.0, tokenInfo.USDValue) // 1 * 2.0
+	assert.Equal(t, "TKN1", tokenInfo.Symbol)
+	assert.Equal(t, uint8(9), tokenInfo.Decimals)
+}
+
+func TestTokenInfo_GetDisplayAmount(t *testing.T) {
+	tests := []struct {
+		name      string
+		tokenInfo TokenInfo
+		expected  string
+	}{
+		{
+			name: "Small amount",
+			tokenInfo: TokenInfo{
+				Amount:   1000000000, // 1.0 with 9 decimals
+				Decimals: 9,
+			},
+			expected: "1.0000",
+		},
+		{
+			name: "Thousand",
+			tokenInfo: TokenInfo{
+				Amount:   1000000000000, // 1000.0 with 9 decimals -> displays as 1.00K
+				Decimals: 9,
+			},
+			expected: "1.00K",
+		},
+		{
+			name: "Million",
+			tokenInfo: TokenInfo{
+				Amount:   1000000000000000, // 1000000.0 with 9 decimals -> displays as 1.00M
+				Decimals: 9,
+			},
+			expected: "1.00M",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.tokenInfo.GetDisplayAmount()
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestTokenInfo_GetValueColor(t *testing.T) {
+	tests := []struct {
+		name     string
+		usdValue float64
+		expected string
+	}{
+		{
+			name:     "High value (>1000)",
+			usdValue: 1500.0,
+			expected: colorGreen,
+		},
+		{
+			name:     "Medium value (>100)",
+			usdValue: 500.0,
+			expected: colorCyan,
+		},
+		{
+			name:     "Low value",
+			usdValue: 50.0,
+			expected: colorWhite,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tokenInfo := TokenInfo{USDValue: tt.usdValue}
+			result := tokenInfo.GetValueColor()
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestFormatWalletValue(t *testing.T) {
+	tests := []struct {
+		name     string
+		value    float64
+		expected string
+	}{
+		{
+			name:     "Small value",
+			value:    123.45,
+			expected: "$123.45",
+		},
+		{
+			name:     "Thousand",
+			value:    1234.56,
+			expected: "$1.23K",
+		},
+		{
+			name:     "Million",
+			value:    1234567.89,
+			expected: "$1.23M",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := formatWalletValue(tt.value)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestFormatPortfolioValue(t *testing.T) {
+	tests := []struct {
+		name     string
+		value    float64
+		expected string
+	}{
+		{
+			name:     "Small value",
+			value:    123.45,
+			expected: "\033[1m\033[32mTOTAL PORTFOLIO VALUE: $123.45\033[0m",
+		},
+		{
+			name:     "Thousand",
+			value:    1234.56,
+			expected: "\033[1m\033[32mTOTAL PORTFOLIO VALUE: $1.23K\033[0m",
+		},
+		{
+			name:     "Million",
+			value:    1234567.89,
+			expected: "\033[1m\033[32mTOTAL PORTFOLIO VALUE: $1.23M\033[0m",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := formatPortfolioValue(tt.value)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestGetKnownTokenName(t *testing.T) {
+	tests := []struct {
+		name     string
+		mint     string
+		expected string
+		found    bool
+	}{
+		{
+			name:     "Known token - SOL",
+			mint:     "So11111111111111111111111111111111111111112",
+			expected: "SOL",
+			found:    true,
+		},
+		{
+			name:     "Known token - USDC",
+			mint:     "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+			expected: "USDC",
+			found:    true,
+		},
+		{
+			name:     "Unknown token",
+			mint:     "unknown_mint_address",
+			expected: "",
+			found:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, found := getKnownTokenName(tt.mint)
+			assert.Equal(t, tt.expected, result)
+			assert.Equal(t, tt.found, found)
 		})
 	}
 }

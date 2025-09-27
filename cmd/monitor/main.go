@@ -222,7 +222,7 @@ func processChanges(changes []monitor.Change, alerter alerts.Alerter, alertCfg c
 			for mint, balance := range change.TokenBalances {
 				tokenDetails = append(tokenDetails, fmt.Sprintf("%s: %d", mint, balance))
 				tokenData[mint] = balance
-				tokenDecimals[mint] = 9 // Default decimals, adjust if you have actual decimals
+				tokenDecimals[mint] = monitor.DefaultTokenDecimals
 			}
 			msg = fmt.Sprintf("New wallet %s detected with %d tokens:\n%s",
 				change.WalletAddress,

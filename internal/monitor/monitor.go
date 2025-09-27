@@ -17,6 +17,34 @@ import (
 	"github.com/gagliardetto/solana-go/rpc"
 )
 
+// Constants for token decimals and display
+const (
+	DefaultTokenDecimals uint8 = 9
+	MaxDisplayHoldings   int   = 5
+)
+
+// Terminal color codes for display
+const (
+	colorReset  = "\033[0m"
+	colorRed    = "\033[31m"
+	colorGreen  = "\033[32m"
+	colorYellow = "\033[33m"
+	colorBlue   = "\033[34m"
+	colorPurple = "\033[35m"
+	colorCyan   = "\033[36m"
+	colorWhite  = "\033[37m"
+	colorBold   = "\033[1m"
+)
+
+// Display symbols
+const (
+	walletSymbol = "💼"
+	tokenSymbol  = "🔹"
+	dollarSymbol = "💲"
+	moreSymbol   = "..."
+	divider      = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+)
+
 type WalletMonitor struct {
 	client       *rpc.Client
 	wallets      []solana.PublicKey
@@ -217,7 +245,7 @@ func (w *WalletMonitor) GetWalletData(wallet solana.PublicKey) (*WalletData, err
 					Balance:     tokenAccount.Amount,
 					LastUpdated: time.Now(),
 					Symbol:      mint[:8] + "...",
-					Decimals:    9,
+					Decimals:    DefaultTokenDecimals,
 				}
 			}
 		}
@@ -471,42 +499,65 @@ func formatTokenValue(value float64, confidence string) string {
 	return fmt.Sprintf(" ($%.2f) %s", value, indicator)
 }
 
-// Add a struct to hold token data with USD value
-type tokenHolding struct {
+// TokenInfo holds complete token information including USD value
+type TokenInfo struct {
 	Mint     string
-	Amount   float64
+	Amount   float64 // Raw amount in smallest units
 	USDValue float64
 	Symbol   string
+	Decimals uint8
 }
 
-// Update the DisplayWalletOverview function to create a more attractive output
-func (m *WalletMonitor) DisplayWalletOverview(walletDataMap map[string]*WalletData) {
-	// Terminal color codes
-	const (
-		colorReset  = "\033[0m"
-		colorRed    = "\033[31m"
-		colorGreen  = "\033[32m"
-		colorYellow = "\033[33m"
-		colorBlue   = "\033[34m"
-		colorPurple = "\033[35m"
-		colorCyan   = "\033[36m"
-		colorWhite  = "\033[37m"
-		colorBold   = "\033[1m"
-	)
+// NewTokenInfo creates a TokenInfo from TokenAccountInfo and price data
+func NewTokenInfo(mint string, accountInfo TokenAccountInfo, priceData price.PriceData, exists bool) TokenInfo {
+	usdValue := 0.0
+	if exists {
+		actualAmount := float64(accountInfo.Balance) / math.Pow(10, float64(accountInfo.Decimals))
+		usdValue = actualAmount * priceData.Price
+	}
 
-	// Symbols
-	const (
-		walletSymbol = "💼"
-		tokenSymbol  = "🔹"
-		dollarSymbol = "💲"
-		moreSymbol   = "..."
-		divider      = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-	)
+	symbol := accountInfo.Symbol
+	if tokenName, found := getKnownTokenName(mint); found {
+		symbol = tokenName
+	}
 
-	fmt.Println()
-	fmt.Printf("%s%s SOLANA WALLET MONITOR %s\n", colorBold, colorPurple, colorReset)
-	fmt.Printf("%s%s %s\n\n", colorPurple, divider, colorReset)
+	return TokenInfo{
+		Mint:     mint,
+		Amount:   float64(accountInfo.Balance),
+		USDValue: usdValue,
+		Symbol:   symbol,
+		Decimals: accountInfo.Decimals,
+	}
+}
 
+// GetDisplayAmount returns the formatted amount for display
+func (t TokenInfo) GetDisplayAmount() string {
+	actualAmount := t.Amount / math.Pow(10, float64(t.Decimals))
+
+	switch {
+	case actualAmount >= 1000000:
+		return fmt.Sprintf("%.2fM", actualAmount/1000000)
+	case actualAmount >= 1000:
+		return fmt.Sprintf("%.2fK", actualAmount/1000)
+	default:
+		return fmt.Sprintf("%.4f", actualAmount)
+	}
+}
+
+// GetValueColor returns the appropriate color for the USD value
+func (t TokenInfo) GetValueColor() string {
+	switch {
+	case t.USDValue > 1000:
+		return colorGreen
+	case t.USDValue > 100:
+		return colorCyan
+	default:
+		return colorWhite
+	}
+}
+
+// updatePricesForWallets collects all unique token mints from wallets and updates their prices
+func (m *WalletMonitor) updatePricesForWallets(walletDataMap map[string]*WalletData) {
 	// Collect all unique mints
 	mints := make([]string, 0)
 	for _, walletData := range walletDataMap {
@@ -519,48 +570,104 @@ func (m *WalletMonitor) DisplayWalletOverview(walletDataMap map[string]*WalletDa
 	if err := m.priceService.UpdatePrices(mints); err != nil {
 		log.Printf("Error updating prices: %v", err)
 	}
+}
 
-	// Total value counter
+// processWalletHoldings converts wallet token accounts to TokenInfo objects and calculates total value
+func (m *WalletMonitor) processWalletHoldings(walletData *WalletData) ([]TokenInfo, float64) {
+	holdings := make([]TokenInfo, 0, len(walletData.TokenAccounts))
+	walletTotalValue := 0.0
+
+	for mint, info := range walletData.TokenAccounts {
+		priceData, exists := m.priceService.GetPrice(mint)
+		tokenInfo := NewTokenInfo(mint, info, priceData, exists)
+
+		if exists {
+			walletTotalValue += tokenInfo.USDValue
+		}
+
+		holdings = append(holdings, tokenInfo)
+	}
+
+	return holdings, walletTotalValue
+}
+
+// formatWalletValue formats a wallet's total value for display
+func formatWalletValue(totalValue float64) string {
+	if totalValue >= 1000000 {
+		return fmt.Sprintf("$%.2fM", totalValue/1000000)
+	} else if totalValue >= 1000 {
+		return fmt.Sprintf("$%.2fK", totalValue/1000)
+	} else {
+		return fmt.Sprintf("$%.2f", totalValue)
+	}
+}
+
+// formatPortfolioValue formats the total portfolio value for display
+func formatPortfolioValue(totalValue float64) string {
+	if totalValue >= 1000000 {
+		return fmt.Sprintf("%s%sTOTAL PORTFOLIO VALUE: $%.2fM%s", colorBold, colorGreen, totalValue/1000000, colorReset)
+	} else if totalValue >= 1000 {
+		return fmt.Sprintf("%s%sTOTAL PORTFOLIO VALUE: $%.2fK%s", colorBold, colorGreen, totalValue/1000, colorReset)
+	} else {
+		return fmt.Sprintf("%s%sTOTAL PORTFOLIO VALUE: $%.2f%s", colorBold, colorGreen, totalValue, colorReset)
+	}
+}
+
+// displayTokenHolding displays a single token holding
+func displayTokenHolding(tokenInfo TokenInfo) {
+	displayName := tokenInfo.Symbol
+	if displayName == tokenInfo.Mint[:8]+"..." {
+		if tokenName, found := getKnownTokenName(tokenInfo.Mint); found {
+			displayName = tokenName
+		}
+	}
+
+	amountStr := tokenInfo.GetDisplayAmount()
+	valueColor := tokenInfo.GetValueColor()
+
+	if tokenInfo.USDValue > 0 {
+		fmt.Printf("   %s %s%-15s%s %12s %s%s($%.2f)%s\n",
+			tokenSymbol,
+			colorBold,
+			displayName,
+			colorReset,
+			amountStr,
+			valueColor,
+			dollarSymbol,
+			tokenInfo.USDValue,
+			colorReset)
+	} else {
+		fmt.Printf("   %s %s%-15s%s %12s\n",
+			tokenSymbol,
+			colorBold,
+			displayName,
+			colorReset,
+			amountStr)
+	}
+}
+
+// DisplayWalletOverview displays a formatted overview of wallet holdings
+func (m *WalletMonitor) DisplayWalletOverview(walletDataMap map[string]*WalletData) {
+	fmt.Println()
+	fmt.Printf("%s%s SOLANA WALLET MONITOR %s\n", colorBold, colorPurple, colorReset)
+	fmt.Printf("%s%s %s\n\n", colorPurple, divider, colorReset)
+
+	// Update prices for all tokens in all wallets
+	m.updatePricesForWallets(walletDataMap)
+
 	totalPortfolioValue := 0.0
 
 	for _, wallet := range m.wallets {
 		fmt.Printf("%s%s %s %s%s\n", colorBold, colorBlue, walletSymbol, wallet.String(), colorReset)
+
 		walletData, exists := walletDataMap[wallet.String()]
 		if !exists {
 			fmt.Printf("   %sNo data available%s\n\n", colorYellow, colorReset)
 			continue
 		}
 
-		// Convert token holdings to slice for sorting
-		holdings := make([]tokenHolding, 0)
-		walletTotalValue := 0.0
-
-		for mint, info := range walletData.TokenAccounts {
-			// Get price data from Jupiter
-			priceData, exists := m.priceService.GetPrice(mint)
-
-			usdValue := 0.0
-			if exists {
-				// Convert balance to float considering decimals
-				actualAmount := float64(info.Balance) / math.Pow(10, float64(info.Decimals))
-				usdValue = actualAmount * priceData.Price
-				walletTotalValue += usdValue
-			}
-
-			// Try to look up well-known token addresses to get better names
-			symbol := info.Symbol
-			if tokenName, found := getKnownTokenName(mint); found {
-				symbol = tokenName
-			}
-
-			holdings = append(holdings, tokenHolding{
-				Mint:     mint,
-				Amount:   float64(info.Balance),
-				USDValue: usdValue,
-				Symbol:   symbol,
-			})
-		}
-
+		// Process wallet holdings
+		holdings, walletTotalValue := m.processWalletHoldings(walletData)
 		totalPortfolioValue += walletTotalValue
 
 		// Sort by USD value descending
@@ -570,73 +677,17 @@ func (m *WalletMonitor) DisplayWalletOverview(walletDataMap map[string]*WalletDa
 
 		// Show wallet total
 		if walletTotalValue > 0 {
-			// Format based on size
-			valueStr := ""
-			if walletTotalValue >= 1000000 {
-				valueStr = fmt.Sprintf("$%.2fM", walletTotalValue/1000000)
-			} else if walletTotalValue >= 1000 {
-				valueStr = fmt.Sprintf("$%.2fK", walletTotalValue/1000)
-			} else {
-				valueStr = fmt.Sprintf("$%.2f", walletTotalValue)
-			}
+			valueStr := formatWalletValue(walletTotalValue)
 			fmt.Printf("   %s%sTotal Value: %s%s\n", colorBold, colorGreen, valueStr, colorReset)
 		}
 
-		// Display top 5 holdings with better formatting
-		for i := 0; i < min(5, len(holdings)); i++ {
-			holding := holdings[i]
-
-			// Get short mint or symbol for display
-			displayName := holding.Symbol
-			if displayName == holding.Mint[:8]+"..." {
-				// If it's still just the short mint, check for known tokens
-				if tokenName, found := getKnownTokenName(holding.Mint); found {
-					displayName = tokenName
-				}
-			}
-
-			// Format amount
-			actualAmount := holding.Amount / math.Pow(10, float64(9)) // assuming 9 decimals
-			amountStr := ""
-			if actualAmount >= 1000000 {
-				amountStr = fmt.Sprintf("%.2fM", actualAmount/1000000)
-			} else if actualAmount >= 1000 {
-				amountStr = fmt.Sprintf("%.2fK", actualAmount/1000)
-			} else {
-				amountStr = fmt.Sprintf("%.4f", actualAmount)
-			}
-
-			// Choose color based on value
-			valueColor := colorWhite
-			if holding.USDValue > 1000 {
-				valueColor = colorGreen
-			} else if holding.USDValue > 100 {
-				valueColor = colorCyan
-			}
-
-			if holding.USDValue > 0 {
-				fmt.Printf("   %s %s%-15s%s %12s %s%s($%.2f)%s\n",
-					tokenSymbol,
-					colorBold,
-					displayName,
-					colorReset,
-					amountStr,
-					valueColor,
-					dollarSymbol,
-					holding.USDValue,
-					colorReset)
-			} else {
-				fmt.Printf("   %s %s%-15s%s %12s\n",
-					tokenSymbol,
-					colorBold,
-					displayName,
-					colorReset,
-					amountStr)
-			}
+		// Display top holdings
+		for i := 0; i < min(MaxDisplayHoldings, len(holdings)); i++ {
+			displayTokenHolding(holdings[i])
 		}
 
-		if len(holdings) > 5 {
-			fmt.Printf("   %s %s%d more tokens%s\n", moreSymbol, colorYellow, len(holdings)-5, colorReset)
+		if len(holdings) > MaxDisplayHoldings {
+			fmt.Printf("   %s %s%d more tokens%s\n", moreSymbol, colorYellow, len(holdings)-MaxDisplayHoldings, colorReset)
 		}
 		fmt.Println()
 	}
@@ -644,13 +695,7 @@ func (m *WalletMonitor) DisplayWalletOverview(walletDataMap map[string]*WalletDa
 	// Display total portfolio value
 	if totalPortfolioValue > 0 {
 		fmt.Printf("%s%s %s\n", colorPurple, divider, colorReset)
-		if totalPortfolioValue >= 1000000 {
-			fmt.Printf("%s%sTOTAL PORTFOLIO VALUE: $%.2fM%s\n", colorBold, colorGreen, totalPortfolioValue/1000000, colorReset)
-		} else if totalPortfolioValue >= 1000 {
-			fmt.Printf("%s%sTOTAL PORTFOLIO VALUE: $%.2fK%s\n", colorBold, colorGreen, totalPortfolioValue/1000, colorReset)
-		} else {
-			fmt.Printf("%s%sTOTAL PORTFOLIO VALUE: $%.2f%s\n", colorBold, colorGreen, totalPortfolioValue, colorReset)
-		}
+		fmt.Println(formatPortfolioValue(totalPortfolioValue))
 	}
 
 	fmt.Printf("%s%s %s\n", colorPurple, divider, colorReset)
