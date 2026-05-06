@@ -87,3 +87,9 @@ func (d *DexScreenerPrice) GetPrice(address string) (PriceData, bool) {
 	data, exists := d.data[strings.ToLower(address)]
 	return data, exists
 }
+
+func (d *DexScreenerPrice) SetPriceForTest(address string, data PriceData) {
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+	d.data[strings.ToLower(address)] = data
+}

@@ -5,6 +5,7 @@ A tool for monitoring Solana and EVM wallet balances, with BSC support prioritiz
 ## Community
 
 Join our Discord community to:
+
 - Get help with setup and configuration
 - Share feedback and suggestions
 - Connect with other users
@@ -21,6 +22,7 @@ Join our Discord community to:
 - 🔔 Console, Discord, and Telegram notifications
 - 🧭 Local browser-based configuration editor
 - 💾 Persistent storage of wallet data
+- 💵 Persist estimated USD price/value fields for scanned token holdings so the local dashboard can display portfolio value
 - 🛡️ Graceful handling of network interruptions
 
 ---
@@ -31,14 +33,15 @@ Join our Discord community to:
 
 ### 🚀 Recommended RPC Providers (Free Tiers Available)
 
-| Provider | Free Tier | Speed | Setup |
-|----------|-----------|-------|-------|
-| **Helius** | 100k requests/day | ⚡⚡⚡ | [Get Free Account](https://helius.dev) |
+| Provider      | Free Tier          | Speed  | Setup                                     |
+| ------------- | ------------------ | ------ | ----------------------------------------- |
+| **Helius**    | 100k requests/day  | ⚡⚡⚡ | [Get Free Account](https://helius.dev)    |
 | **QuickNode** | 30M requests/month | ⚡⚡⚡ | [Get Free Account](https://quicknode.com) |
-| **Triton** | 10M requests/month | ⚡⚡ | [Get Free Account](https://triton.one) |
-| **GenesysGo** | Custom limits | ⚡⚡ | [Get Account](https://genesysgo.com) |
+| **Triton**    | 10M requests/month | ⚡⚡   | [Get Free Account](https://triton.one)    |
+| **GenesysGo** | Custom limits      | ⚡⚡   | [Get Account](https://genesysgo.com)      |
 
 ### ❌ Avoid These (Rate Limited)
+
 ```
 ❌ https://api.mainnet-beta.solana.com (default - gets rate limited)
 ❌ https://api.devnet.solana.com (only for development)
@@ -98,49 +101,51 @@ TELEGRAM_CHAT_ID=
 ### Configuration
 
 1. Copy the example configuration:
+
 ```bash
 cp config.example.json config.json
 ```
 
 2. **⚠️ IMPORTANT**: Edit `config.json` and replace the RPC endpoints:
+
 ```json
 {
-    "scan_interval": "1m",
-    "alerts": {
-        "minimum_balance": 1000,
-        "significant_change": 20,
-        "ignore_tokens": []
-    },
-    "discord": {
-        "enabled": false,
-        "webhook_url": "",
-        "channel_id": ""
-    },
-    "telegram": {
-        "enabled": false,
-        "bot_token": "${TELEGRAM_BOT_TOKEN}",
-        "chat_id": ""
-    },
-    "chains": [
-        {
-            "type": "evm",
-            "name": "BSC",
-            "rpc_url": "${BSC_RPC_URL}",
-            "chain_id": 56,
-            "native_symbol": "BNB",
-            "wallets": ["YOUR_EVM_WALLET_ADDRESS"],
-            "scan": {
-                "scan_mode": "whitelist",
-                "tokens": [
-                    {
-                        "address": "0x55d398326f99059fF775485246999027B3197955",
-                        "symbol": "USDT",
-                        "decimals": 18
-                    }
-                ]
-            }
-        }
-    ]
+  "scan_interval": "1m",
+  "alerts": {
+    "minimum_balance": 1000,
+    "significant_change": 20,
+    "ignore_tokens": []
+  },
+  "discord": {
+    "enabled": false,
+    "webhook_url": "",
+    "channel_id": ""
+  },
+  "telegram": {
+    "enabled": false,
+    "bot_token": "${TELEGRAM_BOT_TOKEN}",
+    "chat_id": ""
+  },
+  "chains": [
+    {
+      "type": "evm",
+      "name": "BSC",
+      "rpc_url": "${BSC_RPC_URL}",
+      "chain_id": 56,
+      "native_symbol": "BNB",
+      "wallets": ["YOUR_EVM_WALLET_ADDRESS"],
+      "scan": {
+        "scan_mode": "whitelist",
+        "tokens": [
+          {
+            "address": "0x55d398326f99059fF775485246999027B3197955",
+            "symbol": "USDT",
+            "decimals": 18
+          }
+        ]
+      }
+    }
+  ]
 }
 ```
 
@@ -149,7 +154,7 @@ cp config.example.json config.json
 ### Configuration Options
 
 - `chains`: Array of chains to monitor. Use `"type": "solana"` or `"type": "evm"`.
-- `rpc_url`: Dedicated RPC endpoint URL. Secret values can use environment placeholders such as `${BSC_RPC_URL}`.
+- `rpc_url`: Dedicated RPC endpoint URL. Secret values can use environment placeholders such as `${BSC_RPC_URL}`. The configuration UI masks this value by default and shows only “已配置” or “未配置”; click “修改” to edit it.
 - `wallets`: Array of wallet addresses for the chain.
 - `scan_interval`: Time between scans (e.g., "30s", "1m", "5m")
 - `alerts`:
@@ -164,6 +169,7 @@ cp config.example.json config.json
   - `enabled`: Set to true to enable Telegram notifications
   - `bot_token`: Telegram bot token
   - `chat_id`: Telegram chat or channel ID
+  - The configuration UI masks notification secrets by default. Configured values show as “已配置”; empty values show as “未配置”. Click “修改” to edit the actual value.
 - `scan`:
   - `scan_mode`: Token scanning mode
     - `"all"`: Monitor all tokens (default)
@@ -178,41 +184,41 @@ cp config.example.json config.json
 Here are examples of different scan configurations:
 
 1. Monitor all tokens:
+
 ```json
 {
-    "scan": {
-        "scan_mode": "all",
-        "include_tokens": [],
-        "exclude_tokens": []
-    }
+  "scan": {
+    "scan_mode": "all",
+    "include_tokens": [],
+    "exclude_tokens": []
+  }
 }
 ```
 
 2. Monitor only specific tokens (whitelist):
+
 ```json
 {
-    "scan": {
-        "scan_mode": "whitelist",
-        "include_tokens": [
-            "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",  // USDC
-            "So11111111111111111111111111111111111111112"     // SOL
-        ],
-        "exclude_tokens": []
-    }
+  "scan": {
+    "scan_mode": "whitelist",
+    "include_tokens": [
+      "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", // USDC
+      "So11111111111111111111111111111111111111112" // SOL
+    ],
+    "exclude_tokens": []
+  }
 }
 ```
 
 3. Monitor all tokens except specific ones (blacklist):
+
 ```json
 {
-    "scan": {
-        "scan_mode": "blacklist",
-        "include_tokens": [],
-        "exclude_tokens": [
-            "TokenAddressToIgnore1",
-            "TokenAddressToIgnore2"
-        ]
-    }
+  "scan": {
+    "scan_mode": "blacklist",
+    "include_tokens": [],
+    "exclude_tokens": ["TokenAddressToIgnore1", "TokenAddressToIgnore2"]
+  }
 }
 ```
 
@@ -235,9 +241,56 @@ make build
 go run cmd/monitor/main.go config-ui -config config.json
 ```
 
-Then open `http://127.0.0.1:8787` in your browser. The page edits chains, wallets, token contracts, thresholds, Discord, and Telegram settings, then saves back to `config.json`.
+Then open `http://127.0.0.1:8787` in your browser. The UI now separates monitoring and configuration: the main page reads `data/wallet_data.json` and shows monitored addresses, current holdings, estimated USD value, and the latest scan time. Balance-change history is produced by comparing consecutive scans and sent through the configured alert channels. All editable settings live under the “配置” page, including chains, RPC, wallets, token contracts, thresholds, Discord, and Telegram settings. Environment-variable placeholders such as `${BSC_RPC_URL}` and `${TELEGRAM_BOT_TOKEN}` are only shown inside the configuration form, avoiding misleading values on the main monitoring page.
+
+The configuration UI can trigger an on-demand scan from the main page. Click “立即扫描” to call `/api/scan`; the backend loads the current `config.json`, scans all configured chains/wallets, writes `data/wallet_data.json`, and returns the updated holdings to the dashboard.
+
+Opening the page still does not start a background scan loop. To refresh holdings continuously, keep the monitor command running in another terminal. It performs an immediate first scan and then scans according to `scan_interval`:
+
+```bash
+go run cmd/monitor/main.go -config config.json
+```
+
+For EVM/BSC chains, native assets such as BNB are displayed alongside configured token contracts. Large BEP-20 balances are stored with an exact `raw_balance` string so the dashboard can display manually configured token balances and estimated USD values without `uint64` overflow. Short internal asset identifiers such as `native` are handled safely in terminal output.
+
+### Development Mode (hot reload)
+
+This project already supports AxonHub-style split development: Go backend uses `air` for hot reload, and the React/Vite frontend uses `pnpm dev`.
+
+One-time setup:
+
+```bash
+go install github.com/air-verse/air@latest
+make setup
+```
+
+Start two terminals from the project root:
+
+```bash
+# Terminal 1: backend API + config UI command, hot reload on Go changes
+make dev-api
+```
+
+```bash
+# Terminal 2: frontend Vite dev server, hot reload on UI changes
+make dev-web
+```
+
+Open `http://127.0.0.1:5173`. In development, Vite proxies `/api` requests to the Go server on `http://127.0.0.1:8081`, and the backend runs with `INSIDER_DEV=1` so it only serves API/CORS instead of embedded static files.
+
+Equivalent manual commands:
+
+```bash
+INSIDER_DEV=1 air
+cd web
+pnpm install
+pnpm dev
+```
+
+`air` reads `.air.toml`, builds `./cmd/monitor`, and runs `config-ui --addr :8081 --config config.json` automatically.
 
 #### Custom Config File
+
 ```bash
 go run cmd/monitor/main.go -config path/to/config.json
 ```
@@ -245,6 +298,7 @@ go run cmd/monitor/main.go -config path/to/config.json
 ### Alert Levels
 
 The monitor uses three alert levels based on the configured `significant_change`:
+
 - 🔴 **Critical**: Changes >= 5x the threshold
 - 🟡 **Warning**: Changes >= 2x the threshold
 - 🟢 **Info**: Changes below 2x the threshold
@@ -252,6 +306,7 @@ The monitor uses three alert levels based on the configured `significant_change`
 ### Data Storage
 
 The monitor stores wallet data in the `./data` directory to:
+
 - Prevent false alerts after restarts
 - Track historical changes
 - Handle network interruptions gracefully
@@ -269,12 +324,15 @@ The binary will be available in the `bin` directory.
 ### Common Issues & Solutions
 
 #### ❌ "Rate limit exceeded" / "Too Many Requests" Error
+
 **Problem**: Using the default public RPC endpoint which has strict rate limits
+
 ```
 ❌ Rate limit exceeded after 5 retries
 ```
 
-**Solution**: 
+**Solution**:
+
 1. Get a free RPC endpoint from [one of the providers above](#-recommended-rpc-providers-free-tiers-available)
 2. Update your `config.json` with the new endpoint:
    ```json
@@ -285,12 +343,15 @@ The binary will be available in the `bin` directory.
    ```
 
 #### ❌ "Invalid wallet address format" Error
+
 **Problem**: Incorrect wallet address format in config.json
+
 ```
 ❌ invalid wallet address format at index 0: abc123
 ```
 
 **Solution**: Ensure wallet addresses are valid Solana base58 encoded addresses (32-44 characters)
+
 ```json
 {
   "wallets": [
@@ -300,20 +361,25 @@ The binary will be available in the `bin` directory.
 ```
 
 #### ❌ "Configuration file not found" Error
+
 **Problem**: config.json doesn't exist
+
 ```
 ❌ Configuration file not found: config.json
 ```
 
-**Solution**: 
+**Solution**:
+
 ```bash
 cp config.example.json config.json
 ```
 
 #### ❌ "Connection check failed" Error
+
 **Problem**: Network or RPC endpoint issues
 
 **Solution**:
+
 1. Check your internet connection
 2. Verify your RPC endpoint URL is correct
 3. Try a different RPC provider
@@ -327,6 +393,7 @@ cp config.example.json config.json
 ### Getting Help
 
 If you're still having issues:
+
 1. Check our [Discord community](https://discord.gg/7vY9ZBPdya) for help
 2. Review the logs for specific error messages
 3. Ensure you have the latest version of the monitor

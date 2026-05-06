@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"math/big"
 	"sort"
 	"strings"
 	"time"
@@ -104,6 +105,7 @@ func derefScanConfig(scanConfig *config.ScanConfig) config.ScanConfig {
 // Simplified TokenAccountInfo
 type TokenAccountInfo struct {
 	Balance         uint64    `json:"balance"`
+	RawBalance      string    `json:"raw_balance,omitempty"`
 	LastUpdated     time.Time `json:"last_updated"`
 	Symbol          string    `json:"symbol"`
 	Decimals        uint8     `json:"decimals"`
@@ -288,6 +290,34 @@ func (w *WalletMonitor) GetWalletData(wallet solana.PublicKey) (*WalletData, err
 	return walletData, nil
 }
 
+func (w *WalletMonitor) enrichPrices(walletDataMap map[string]*WalletData) error {
+	mints := make([]string, 0)
+	for _, walletData := range walletDataMap {
+		for mint := range walletData.TokenAccounts {
+			mints = append(mints, mint)
+		}
+	}
+
+	if err := w.priceService.UpdatePrices(mints); err != nil {
+		return err
+	}
+
+	for _, walletData := range walletDataMap {
+		for mint, info := range walletData.TokenAccounts {
+			priceData, exists := w.priceService.GetPrice(mint)
+			if !exists {
+				continue
+			}
+			actualAmount := tokenAmountFloat(info)
+			info.USDPrice = priceData.Price
+			info.USDValue = actualAmount * priceData.Price
+			info.ConfidenceLevel = priceData.ConfidenceLevel
+			walletData.TokenAccounts[mint] = info
+		}
+	}
+	return nil
+}
+
 // Add these type definitions
 type Change struct {
 	ChainName     string
@@ -301,6 +331,17 @@ type Change struct {
 	NewBalance    uint64
 	ChangePercent float64
 	TokenBalances map[string]uint64 `json:",omitempty"`
+}
+
+func tokenAmountFloat(info TokenAccountInfo) float64 {
+	if info.RawBalance != "" {
+		if value, ok := new(big.Float).SetString(info.RawBalance); ok {
+			divisor := new(big.Float).SetFloat64(math.Pow(10, float64(info.Decimals)))
+			amount, _ := new(big.Float).Quo(value, divisor).Float64()
+			return amount
+		}
+	}
+	return float64(info.Balance) / math.Pow(10, float64(info.Decimals))
 }
 
 func calculatePercentageChange(old, new uint64) float64 {
@@ -387,6 +428,9 @@ func (w *WalletMonitor) ScanAllWallets() (map[string]*WalletData, error) {
 		}
 	}
 
+	if err := w.enrichPrices(results); err != nil {
+		log.Printf("Error updating prices: %v", err)
+	}
 	return results, nil
 }
 
@@ -554,7 +598,7 @@ type TokenInfo struct {
 func NewTokenInfo(mint string, accountInfo TokenAccountInfo, priceData price.PriceData, exists bool) TokenInfo {
 	usdValue := 0.0
 	if exists {
-		actualAmount := float64(accountInfo.Balance) / math.Pow(10, float64(accountInfo.Decimals))
+		actualAmount := tokenAmountFloat(accountInfo)
 		usdValue = actualAmount * priceData.Price
 	}
 
@@ -600,16 +644,7 @@ func (t TokenInfo) GetValueColor() string {
 
 // updatePricesForWallets collects all unique token mints from wallets and updates their prices
 func (m *WalletMonitor) updatePricesForWallets(walletDataMap map[string]*WalletData) {
-	// Collect all unique mints
-	mints := make([]string, 0)
-	for _, walletData := range walletDataMap {
-		for mint := range walletData.TokenAccounts {
-			mints = append(mints, mint)
-		}
-	}
-
-	// Update prices for all tokens
-	if err := m.priceService.UpdatePrices(mints); err != nil {
+	if err := m.enrichPrices(walletDataMap); err != nil {
 		log.Printf("Error updating prices: %v", err)
 	}
 }
@@ -658,7 +693,11 @@ func formatPortfolioValue(totalValue float64) string {
 // displayTokenHolding displays a single token holding
 func displayTokenHolding(tokenInfo TokenInfo) {
 	displayName := tokenInfo.Symbol
-	if displayName == tokenInfo.Mint[:8]+"..." {
+	shortMint := tokenInfo.Mint
+	if len(shortMint) > 8 {
+		shortMint = shortMint[:8]
+	}
+	if displayName == shortMint+"..." {
 		if tokenName, found := getKnownTokenName(tokenInfo.Mint); found {
 			displayName = tokenName
 		}

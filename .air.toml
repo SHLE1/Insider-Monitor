@@ -1,0 +1,16 @@
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  cmd = "go build -o ./tmp/insider-monitor ./cmd/monitor"
+  bin = "./tmp/insider-monitor"
+  args_bin = ["config-ui", "--addr", ":8081", "--config", "config.json"]
+  include_ext = ["go"]
+  exclude_dir = ["tmp", "bin", "web", "data", "docs"]
+  delay = 500
+
+[screen]
+  clear_on_rebuild = false
+
+[log]
+  time = true

@@ -357,6 +357,17 @@ func TestFormatPortfolioValue(t *testing.T) {
 	}
 }
 
+func TestDisplayTokenHoldingWithShortMint(t *testing.T) {
+	assert.NotPanics(t, func() {
+		displayTokenHolding(TokenInfo{
+			Mint:     "native",
+			Amount:   1e18,
+			Symbol:   "BNB",
+			Decimals: 18,
+		})
+	})
+}
+
 func TestGetKnownTokenName(t *testing.T) {
 	tests := []struct {
 		name     string

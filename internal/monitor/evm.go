@@ -60,6 +60,7 @@ func (m *EVMMonitor) ScanAllWallets() (map[string]*WalletData, error) {
 		}
 		results[WalletDataKey(data.ChainName, data.WalletAddress)] = data
 	}
+	m.enrichPrices(results)
 	return results, nil
 }
 
@@ -78,6 +79,7 @@ func (m *EVMMonitor) GetWalletData(wallet string) (*WalletData, error) {
 	}
 	walletData.TokenAccounts[nativeAssetAddress] = TokenAccountInfo{
 		Balance:     bigToUint64(nativeBalance),
+		RawBalance:  nativeBalance.String(),
 		LastUpdated: time.Now(),
 		Symbol:      m.chain.NativeSymbol,
 		Decimals:    18,
@@ -115,7 +117,7 @@ func (m *EVMMonitor) DisplayWalletOverview(walletDataMap map[string]*WalletData)
 			usdValue := 0.0
 			if mint != nativeAssetAddress {
 				if priceData, exists := m.priceService.GetPrice(mint); exists {
-					actualAmount := float64(info.Balance) / math.Pow(10, float64(info.Decimals))
+					actualAmount := tokenAmountFloat(info)
 					usdValue = actualAmount * priceData.Price
 				}
 			}
@@ -145,6 +147,12 @@ func (m *EVMMonitor) DisplayWalletOverview(walletDataMap map[string]*WalletData)
 }
 
 func (m *EVMMonitor) updatePrices(walletDataMap map[string]*WalletData) {
+	if err := m.enrichPrices(walletDataMap); err != nil {
+		fmt.Printf("%s提醒：更新 %s 价格失败：%v%s\n", colorYellow, m.chain.Name, err, colorReset)
+	}
+}
+
+func (m *EVMMonitor) enrichPrices(walletDataMap map[string]*WalletData) error {
 	addresses := make([]string, 0)
 	for _, data := range walletDataMap {
 		if data.ChainName != m.chain.Name {
@@ -156,9 +164,28 @@ func (m *EVMMonitor) updatePrices(walletDataMap map[string]*WalletData) {
 			}
 		}
 	}
+
 	if err := m.priceService.UpdatePrices(addresses); err != nil {
-		fmt.Printf("%s提醒：更新 %s 价格失败：%v%s\n", colorYellow, m.chain.Name, err, colorReset)
+		return err
 	}
+
+	for _, data := range walletDataMap {
+		if data.ChainName != m.chain.Name {
+			continue
+		}
+		for mint, info := range data.TokenAccounts {
+			priceData, exists := m.priceService.GetPrice(mint)
+			if !exists {
+				continue
+			}
+			actualAmount := tokenAmountFloat(info)
+			info.USDPrice = priceData.Price
+			info.USDValue = actualAmount * priceData.Price
+			info.ConfidenceLevel = priceData.ConfidenceLevel
+			data.TokenAccounts[mint] = info
+		}
+	}
+	return nil
 }
 
 func (m *EVMMonitor) checkConnection() error {
@@ -213,6 +240,7 @@ func (m *EVMMonitor) getTokenInfo(wallet string, token config.TokenConfig) (Toke
 
 	return TokenAccountInfo{
 		Balance:     bigToUint64(balance),
+		RawBalance:  balance.String(),
 		LastUpdated: time.Now(),
 		Symbol:      symbol,
 		Decimals:    decimals,

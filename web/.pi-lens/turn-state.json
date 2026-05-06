@@ -1,0 +1,61 @@
+{
+  "files": {
+    "src/App.tsx": {
+      "modifiedRanges": [
+        {
+          "start": 1,
+          "end": 509
+        }
+      ],
+      "importsChanged": true,
+      "lastEdit": "2026-05-06T05:19:55.439Z"
+    },
+    "src/components/NotificationsSection.tsx": {
+      "modifiedRanges": [
+        {
+          "start": 1,
+          "end": 156
+        }
+      ],
+      "importsChanged": true,
+      "lastEdit": "2026-05-06T05:23:57.829Z"
+    },
+    "src/components/ChainCard.tsx": {
+      "modifiedRanges": [
+        {
+          "start": 1,
+          "end": 289
+        }
+      ],
+      "importsChanged": true,
+      "lastEdit": "2026-05-06T05:26:20.227Z"
+    },
+    "src/types/wallet.ts": {
+      "modifiedRanges": [
+        {
+          "start": 1,
+          "end": 21
+        }
+      ],
+      "importsChanged": false,
+      "lastEdit": "2026-05-06T05:12:43.664Z"
+    },
+    "src/lib/api.ts": {
+      "modifiedRanges": [
+        {
+          "start": 2,
+          "end": 2
+        },
+        {
+          "start": 21,
+          "end": 35
+        }
+      ],
+      "importsChanged": true,
+      "lastEdit": "2026-05-06T05:18:42.270Z"
+    }
+  },
+  "turnCycles": 0,
+  "maxCycles": 3,
+  "lastUpdated": "2026-05-06T05:26:20.227Z"
+}

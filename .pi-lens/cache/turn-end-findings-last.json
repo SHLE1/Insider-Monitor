@@ -1,0 +1,3 @@
+{
+  "signature": "internal/monitor/evm_test.go|internal/monitor/monitor.go|internal/price/dexscreener.go::📐 Cascade errors in 1 neighbor file(s) — fix before finishing turn:\n<diagnostics file=\"internal/monitor/evm_test.go\" reason=\"fallback\">\n  line 91, col 19 rule=cascade:MissingFieldOrMethod: mon.priceService.SetPriceForTest undefined (type *price.DexScreenerPrice has no field or method SetP\n</diagnostics>\n\n🔴 New duplicates in modified code:\n  internal/monitor/evm.go:176 ↔ internal/monitor/monitor.go:305 (9 lines)\n  First location: internal/monitor/monitor.go\n"
+}

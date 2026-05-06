@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/accursedgalaxy/insider-monitor/internal/config"
+	"github.com/accursedgalaxy/insider-monitor/internal/price"
 )
 
 func TestEVMMonitorScansNativeAndConfiguredToken(t *testing.T) {
@@ -79,6 +80,40 @@ func TestEVMMonitorScansNativeAndConfiguredToken(t *testing.T) {
 	tokenInfo := walletData.TokenAccounts[strings.ToLower(token)]
 	if tokenInfo.Symbol != "USDT" || tokenInfo.Decimals != 18 {
 		t.Fatalf("expected USDT token metadata, got %#v", tokenInfo)
+	}
+}
+
+func TestEVMEnrichPricesWritesUSDFields(t *testing.T) {
+	mon := &EVMMonitor{
+		chain:        config.ChainConfig{Name: "BSC"},
+		priceService: price.NewDexScreenerPrice(),
+	}
+	mon.priceService.SetPriceForTest("0x2222222222222222222222222222222222222222", price.PriceData{
+		Price:           2,
+		ConfidenceLevel: "medium",
+	})
+
+	data := map[string]*WalletData{
+		"BSC:wallet1": {
+			ChainName:     "BSC",
+			WalletAddress: "wallet1",
+			TokenAccounts: map[string]TokenAccountInfo{
+				"0x2222222222222222222222222222222222222222": {
+					Balance:  1_000_000,
+					Symbol:   "TKN",
+					Decimals: 6,
+				},
+			},
+		},
+	}
+
+	if err := mon.enrichPrices(data); err != nil {
+		t.Fatal(err)
+	}
+
+	info := data["BSC:wallet1"].TokenAccounts["0x2222222222222222222222222222222222222222"]
+	if info.USDPrice != 2 || info.USDValue != 2 || info.ConfidenceLevel != "medium" {
+		t.Fatalf("expected USD fields to be persisted, got %#v", info)
 	}
 }
 
