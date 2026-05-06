@@ -1,6 +1,7 @@
 # Binaries and build output
 /bin/
 /dist/
+/monitor
 *.exe
 *.exe~
 *.dll

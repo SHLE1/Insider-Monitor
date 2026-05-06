@@ -1,6 +1,6 @@
-# Solana Insider Monitor
+# Multi-Chain Insider Monitor
 
-A tool for monitoring Solana wallet activities, detecting balance changes, and receiving real-time alerts.
+A tool for monitoring Solana and EVM wallet balances, with BSC support prioritized, balance-change alerts, local configuration UI, and Console/Discord/Telegram notifications.
 
 ## Community
 
@@ -15,10 +15,11 @@ Join our Discord community to:
 
 ## Features
 
-- 🔍 Monitor multiple Solana wallets simultaneously
-- 💰 Track token balance changes
+- 🔍 Monitor multiple Solana and EVM/BSC wallets simultaneously
+- 💰 Track native coin and token balance changes
 - ⚡ Real-time alerts for significant changes
-- 🔔 Discord integration for notifications
+- 🔔 Console, Discord, and Telegram notifications
+- 🧭 Local browser-based configuration editor
 - 💾 Persistent storage of wallet data
 - 🛡️ Graceful handling of network interruptions
 
@@ -76,6 +77,24 @@ cd insider-monitor
 go mod download
 ```
 
+### Environment File
+
+The monitor reads `.env` automatically from the project directory or the config file directory. Keep real RPC URLs and bot tokens there:
+
+```bash
+cp .env.example .env
+```
+
+Then edit `.env`:
+
+```env
+BSC_RPC_URL=https://your-bsc-rpc-endpoint
+SOLANA_RPC_URL=https://your-solana-rpc-endpoint
+DISCORD_WEBHOOK_URL=
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_CHAT_ID=
+```
+
 ### Configuration
 
 1. Copy the example configuration:
@@ -83,43 +102,68 @@ go mod download
 cp config.example.json config.json
 ```
 
-2. **⚠️ IMPORTANT**: Edit `config.json` and replace the RPC endpoint:
+2. **⚠️ IMPORTANT**: Edit `config.json` and replace the RPC endpoints:
 ```json
 {
-    "network_url": "YOUR_DEDICATED_RPC_URL_HERE",
-    "wallets": [
-        "YOUR_WALLET_ADDRESS_1",
-        "YOUR_WALLET_ADDRESS_2"
-    ],
     "scan_interval": "1m",
     "alerts": {
         "minimum_balance": 1000,
-        "significant_change": 0.20,
+        "significant_change": 20,
         "ignore_tokens": []
     },
     "discord": {
         "enabled": false,
         "webhook_url": "",
         "channel_id": ""
-    }
+    },
+    "telegram": {
+        "enabled": false,
+        "bot_token": "${TELEGRAM_BOT_TOKEN}",
+        "chat_id": ""
+    },
+    "chains": [
+        {
+            "type": "evm",
+            "name": "BSC",
+            "rpc_url": "${BSC_RPC_URL}",
+            "chain_id": 56,
+            "native_symbol": "BNB",
+            "wallets": ["YOUR_EVM_WALLET_ADDRESS"],
+            "scan": {
+                "scan_mode": "whitelist",
+                "tokens": [
+                    {
+                        "address": "0x55d398326f99059fF775485246999027B3197955",
+                        "symbol": "USDT",
+                        "decimals": 18
+                    }
+                ]
+            }
+        }
+    ]
 }
 ```
 
-3. **Get your RPC endpoint** from the [providers listed above](#-recommended-rpc-providers-free-tiers-available) and update `network_url`
+3. **Get your RPC endpoint** from the [providers listed above](#-recommended-rpc-providers-free-tiers-available) and update `rpc_url`
 
 ### Configuration Options
 
-- `network_url`: **Your dedicated RPC endpoint URL** (see RPC setup section above)
-- `wallets`: Array of Solana wallet addresses to monitor
+- `chains`: Array of chains to monitor. Use `"type": "solana"` or `"type": "evm"`.
+- `rpc_url`: Dedicated RPC endpoint URL. Secret values can use environment placeholders such as `${BSC_RPC_URL}`.
+- `wallets`: Array of wallet addresses for the chain.
 - `scan_interval`: Time between scans (e.g., "30s", "1m", "5m")
 - `alerts`:
   - `minimum_balance`: Minimum token balance to trigger alerts
-  - `significant_change`: Percentage change to trigger alerts (0.20 = 20%)
+  - `significant_change`: Percentage change to trigger alerts (20 = 20%)
   - `ignore_tokens`: Array of token addresses to ignore
 - `discord`:
   - `enabled`: Set to true to enable Discord notifications
   - `webhook_url`: Discord webhook URL
   - `channel_id`: Discord channel ID
+- `telegram`:
+  - `enabled`: Set to true to enable Telegram notifications
+  - `bot_token`: Telegram bot token
+  - `chat_id`: Telegram chat or channel ID
 - `scan`:
   - `scan_mode`: Token scanning mode
     - `"all"`: Monitor all tokens (default)
@@ -127,6 +171,7 @@ cp config.example.json config.json
     - `"blacklist"`: Monitor all tokens except those in `exclude_tokens`
   - `include_tokens`: Array of token addresses to specifically monitor (used with `whitelist` mode)
   - `exclude_tokens`: Array of token addresses to ignore (used with `blacklist` mode)
+  - `tokens`: EVM/BSC token contracts to query. Standard RPC cannot reliably discover every BEP-20 token automatically, so BSC tokens should be listed here.
 
 ### Scan Mode Examples
 
@@ -176,6 +221,21 @@ Here are examples of different scan configurations:
 ```bash
 go run cmd/monitor/main.go
 ```
+
+Or build and run the current binary:
+
+```bash
+make build
+./bin/insider-monitor -config config.json
+```
+
+### Local Configuration UI
+
+```bash
+go run cmd/monitor/main.go config-ui -config config.json
+```
+
+Then open `http://127.0.0.1:8787` in your browser. The page edits chains, wallets, token contracts, thresholds, Discord, and Telegram settings, then saves back to `config.json`.
 
 #### Custom Config File
 ```bash

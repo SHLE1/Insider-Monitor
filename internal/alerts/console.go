@@ -59,7 +59,10 @@ func (a *ConsoleAlerter) SendAlert(alert Alert) error {
 		shortWallet = shortWallet[:8] + "..." + shortWallet[len(shortWallet)-8:]
 	}
 
-	fmt.Printf("Wallet: %s%s%s\n", utils.ColorBold, shortWallet, utils.ColorReset)
+	fmt.Printf("钱包：%s%s%s\n", utils.ColorBold, shortWallet, utils.ColorReset)
+	if alert.ChainName != "" {
+		fmt.Printf("链：%s%s%s\n", utils.ColorBold, alert.ChainName, utils.ColorReset)
+	}
 
 	// Format message content
 	lines := strings.Split(alert.Message, "\n")
@@ -76,7 +79,7 @@ func (a *ConsoleAlerter) SendAlert(alert Alert) error {
 				direction = "↓"
 				valueColor = utils.ColorRed
 			}
-			fmt.Printf("Change: %s%s %.2f%%%s\n",
+			fmt.Printf("变化：%s%s %.2f%%%s\n",
 				valueColor,
 				direction,
 				pct,

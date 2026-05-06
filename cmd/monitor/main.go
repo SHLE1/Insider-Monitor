@@ -11,200 +11,190 @@ import (
 
 	"github.com/accursedgalaxy/insider-monitor/internal/alerts"
 	"github.com/accursedgalaxy/insider-monitor/internal/config"
+	"github.com/accursedgalaxy/insider-monitor/internal/configui"
 	"github.com/accursedgalaxy/insider-monitor/internal/monitor"
 	"github.com/accursedgalaxy/insider-monitor/internal/storage"
 	"github.com/accursedgalaxy/insider-monitor/internal/utils"
 )
 
-// WalletScanner interface defines the contract for wallet monitoring
 type WalletScanner interface {
 	ScanAllWallets() (map[string]*monitor.WalletData, error)
 	DisplayWalletOverview(walletDataMap map[string]*monitor.WalletData)
 }
 
 func main() {
-	// Create our custom logger
 	logger := utils.NewLogger(false)
 
-	configPath := flag.String("config", "config.json", "Path to configuration file")
-	flag.Parse()
+	if len(os.Args) > 1 && os.Args[1] == "config-ui" {
+		runConfigUI(logger, os.Args[2:])
+		return
+	}
 
-	// Print welcome message
-	fmt.Printf("\n%s%s SOLANA INSIDER MONITOR %s\n", utils.ColorBold, utils.ColorPurple, utils.ColorReset)
+	flags := flag.NewFlagSet("monitor", flag.ExitOnError)
+	configPath := flags.String("config", "config.json", "Path to configuration file")
+	_ = flags.Parse(os.Args[1:])
+
+	fmt.Printf("\n%s%s 多链钱包监控 %s\n", utils.ColorBold, utils.ColorPurple, utils.ColorReset)
 	fmt.Printf("%s━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n\n", utils.ColorPurple, utils.ColorReset)
 
-	// Load configuration
-	cfg, err := config.LoadConfig(*configPath)
+	cfg := loadAndValidateConfig(*configPath, logger)
+
+	scanner, err := monitor.NewMultiChainMonitor(cfg.Chains)
 	if err != nil {
-		if os.IsNotExist(err) {
-			logger.Fatal("Configuration file not found: %v\n\n"+
-				"💡 Quick fix:\n"+
-				"   1. Copy the example: cp config.example.json config.json\n"+
-				"   2. Edit config.json with your settings\n"+
-				"   3. Get a free RPC endpoint from:\n"+
-				"      • Helius: https://helius.dev\n"+
-				"      • QuickNode: https://quicknode.com\n"+
-				"      • Triton: https://triton.one", err)
-		}
-		logger.Fatal("Failed to load config: %v\n\n"+
-			"💡 Check that your config.json file has valid JSON syntax.\n"+
-			"   You can validate it at https://jsonlint.com/", err)
+		logger.Fatal("创建钱包监控失败：%v", err)
 	}
 
-	if err := cfg.Validate(); err != nil {
-		logger.Fatal("Configuration validation failed:\n%v", err)
-	}
+	alerter := buildAlerter(cfg, logger)
 
-	// Initialize scanner
-	scanner, err := monitor.NewWalletMonitor(cfg.NetworkURL, cfg.Wallets, &cfg.Scan)
-	if err != nil {
-		logger.Fatal("Failed to create wallet monitor: %v\n\n"+
-			"💡 This usually means:\n"+
-			"   • Invalid wallet address format in config.json\n"+
-			"   • Network connectivity issues\n"+
-			"   • RPC endpoint problems\n\n"+
-			"   Verify your wallet addresses are valid Solana addresses.", err)
-	}
-
-	// Initialize alerter
-	var alerter alerts.Alerter
-	if cfg.Discord.Enabled {
-		alerter = alerts.NewDiscordAlerter(cfg.Discord.WebhookURL, cfg.Discord.ChannelID)
-		logger.Config("Discord alerts enabled")
-	} else {
-		alerter = &alerts.ConsoleAlerter{}
-		logger.Config("Console alerts enabled")
-	}
-
-	// Parse scan interval
 	scanInterval, err := time.ParseDuration(cfg.ScanInterval)
 	if err != nil {
-		logger.Warning("Invalid scan interval '%s', using default of 1 minute", cfg.ScanInterval)
+		logger.Warning("扫描间隔 '%s' 无效，使用默认值 1 分钟", cfg.ScanInterval)
 		scanInterval = time.Minute
 	}
 
 	runMonitor(scanner, alerter, cfg, scanInterval, logger)
 }
 
-func runMonitor(scanner WalletScanner, alerter alerts.Alerter, cfg *config.Config, scanInterval time.Duration, logger *utils.Logger) {
-	storage := storage.New("./data")
+func runConfigUI(logger *utils.Logger, args []string) {
+	flags := flag.NewFlagSet("config-ui", flag.ExitOnError)
+	configPath := flags.String("config", "config.json", "Path to configuration file")
+	addr := flags.String("addr", "127.0.0.1:8787", "Local address for the config UI")
+	_ = flags.Parse(args)
 
-	// Create buffered channels for graceful shutdown
+	logger.Config("配置页面已启动：http://%s", *addr)
+	if err := configui.Serve(*addr, *configPath); err != nil {
+		logger.Fatal("配置页面启动失败：%v", err)
+	}
+}
+
+func loadAndValidateConfig(configPath string, logger *utils.Logger) *config.Config {
+	cfg, err := config.LoadConfig(configPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			logger.Fatal("找不到配置文件：%v\n\n处理方式：\n   1. 复制示例配置：cp config.example.json config.json\n   2. 修改 config.json\n   3. 在 .env 中填写 Solana 或 BSC RPC", err)
+		}
+		logger.Fatal("读取配置失败：%v", err)
+	}
+
+	if err := cfg.Validate(); err != nil {
+		logger.Fatal("配置校验失败：\n%v", err)
+	}
+	return cfg
+}
+
+func buildAlerter(cfg *config.Config, logger *utils.Logger) alerts.Alerter {
+	alerters := []alerts.Alerter{&alerts.ConsoleAlerter{}}
+	logger.Config("终端提醒已启用")
+
+	if cfg.Discord.Enabled {
+		alerters = append(alerters, alerts.NewDiscordAlerter(cfg.Discord.WebhookURL, cfg.Discord.ChannelID))
+		logger.Config("Discord 提醒已启用")
+	}
+	if cfg.Telegram.Enabled {
+		alerters = append(alerters, alerts.NewTelegramAlerter(cfg.Telegram.BotToken, cfg.Telegram.ChatID))
+		logger.Config("Telegram 提醒已启用")
+	}
+
+	return alerts.NewMultiAlerter(alerters...)
+}
+
+func runMonitor(scanner WalletScanner, alerter alerts.Alerter, cfg *config.Config, scanInterval time.Duration, logger *utils.Logger) {
+	store := storage.New("./data")
+
 	interrupt := make(chan os.Signal, 1)
 	done := make(chan bool, 1)
 	signal.Notify(interrupt, os.Interrupt, syscall.SIGTERM)
 
-	// Track connection state
 	var lastSuccessfulScan time.Time
 	var connectionLost bool
-
-	// Define maximum allowed time between successful scans
 	maxTimeBetweenScans := scanInterval * 3
 
-	// Initialize previousData from storage at startup
-	var previousData map[string]*monitor.WalletData
-	if savedData, err := storage.LoadWalletData(); err == nil {
-		previousData = savedData
-		logger.Storage("Loaded previous wallet data from storage")
+	previousData, err := store.LoadWalletData()
+	if err == nil {
+		logger.Storage("已读取上次钱包数据")
 	} else {
-		logger.Warning("Could not load previous data: %v. Will initialize after first scan.", err)
+		logger.Warning("无法读取上次数据：%v。首次扫描后会重新建立基线。", err)
 		previousData = make(map[string]*monitor.WalletData)
 	}
 
-	// Perform initial scan immediately
-	logger.Scan("Performing initial wallet scan...")
+	logger.Scan("开始首次钱包扫描...")
 	initialResults, err := scanner.ScanAllWallets()
 	if err != nil {
-		logger.Error("Initial scan failed: %v", err)
-		logger.Error("\n💡 Common solutions:")
-		logger.Error("   • Check your internet connection")
-		logger.Error("   • Verify your RPC endpoint is working")
-		logger.Error("   • Ensure wallet addresses in config.json are valid")
-		logger.Error("   • Try a different RPC provider if rate limited")
-		logger.Error("\nThe monitor will continue trying in the background...")
+		logger.Error("首次扫描失败：%v", err)
+		logger.Error("监控会继续在后台重试。")
 	} else {
-		if err := storage.SaveWalletData(initialResults); err != nil {
-			logger.Error("Error saving initial data: %v", err)
+		if err := store.SaveWalletData(initialResults); err != nil {
+			logger.Error("保存首次扫描数据失败：%v", err)
 		}
 		lastSuccessfulScan = time.Now()
-		logger.Success("Initial scan complete. Found data for %d wallets", len(initialResults))
+		logger.Success("首次扫描完成，已获取 %d 个钱包的数据", len(initialResults))
 		scanner.DisplayWalletOverview(initialResults)
 	}
 
-	// Start monitoring in a separate goroutine
 	go func() {
 		ticker := time.NewTicker(scanInterval)
 		defer ticker.Stop()
 
-		logger.Info("Starting monitoring loop with %v interval...", scanInterval)
+		logger.Info("监控循环已启动，扫描间隔：%v", scanInterval)
 
 		for {
 			select {
 			case <-ticker.C:
-				// Check if we've exceeded the maximum time between scans
-				if time.Since(lastSuccessfulScan) > maxTimeBetweenScans && !connectionLost {
+				if !lastSuccessfulScan.IsZero() && time.Since(lastSuccessfulScan) > maxTimeBetweenScans && !connectionLost {
 					connectionLost = true
-					logger.Warning("No successful scan in %v, marking connection as lost", maxTimeBetweenScans)
+					logger.Warning("%v 内没有成功扫描，已标记连接异常", maxTimeBetweenScans)
 					continue
 				}
 
 				newResults, err := scanner.ScanAllWallets()
 				if err != nil {
-					logger.Error("Error scanning wallets: %v", err)
+					logger.Error("扫描钱包失败：%v", err)
 					if !connectionLost {
 						connectionLost = true
-						logger.Network("Connection appears to be lost, will suppress alerts until restored")
+						logger.Network("连接可能已中断，恢复前会暂停提醒，避免误报")
 					}
 					continue
 				}
 
-				// Connection restored check
 				if connectionLost {
 					connectionLost = false
-					logger.Network("Connection restored, loading previous data to prevent false alerts")
-					if savedData, err := storage.LoadWalletData(); err == nil {
+					logger.Network("连接已恢复，正在读取上次数据以避免误报")
+					if savedData, err := store.LoadWalletData(); err == nil {
 						previousData = savedData
 					}
 					lastSuccessfulScan = time.Now()
 					continue
 				}
 
-				// Update last successful scan time
 				lastSuccessfulScan = time.Now()
 
-				// Process changes only if we have previous data
 				if len(previousData) > 0 {
 					changes := monitor.DetectChanges(previousData, newResults, cfg.Alerts.SignificantChange)
 					processChanges(changes, alerter, cfg.Alerts, logger)
 				} else {
-					// First scan, just store the data without generating alerts
-					logger.Info("Initial scan completed, storing baseline data")
+					logger.Info("首次扫描完成，已保存基线数据")
 				}
 
-				// Save new results
-				if err := storage.SaveWalletData(newResults); err != nil {
-					logger.Error("Error saving data: %v", err)
+				if err := store.SaveWalletData(newResults); err != nil {
+					logger.Error("保存数据失败：%v", err)
 				}
 				previousData = newResults
-
-				// Display wallet overview
 				scanner.DisplayWalletOverview(newResults)
 
 			case <-done:
-				logger.Info("Monitoring loop stopped")
+				logger.Info("监控循环已停止")
 				return
 			}
 		}
 	}()
 
-	// Wait for interrupt signal
 	<-interrupt
-	logger.Info("Shutting down gracefully...")
+	logger.Info("正在安全退出...")
 	if err := monitor.LogToFile("./data", "Monitor shutting down gracefully"); err != nil {
-		logger.Error("Failed to write shutdown log: %v", err)
+		logger.Error("写入退出日志失败：%v", err)
 	}
 	done <- true
-	time.Sleep(time.Second) // Give a moment for final cleanup
+	time.Sleep(time.Second)
 }
 
 func processChanges(changes []monitor.Change, alerter alerts.Alerter, alertCfg config.AlertConfig, logger *utils.Logger) {
@@ -215,7 +205,6 @@ func processChanges(changes []monitor.Change, alerter alerts.Alerter, alertCfg c
 
 		switch change.ChangeType {
 		case "new_wallet":
-			// Create a consolidated message for all tokens
 			var tokenDetails []string
 			tokenData := make(map[string]uint64)
 			tokenDecimals := make(map[string]uint8)
@@ -224,7 +213,7 @@ func processChanges(changes []monitor.Change, alerter alerts.Alerter, alertCfg c
 				tokenData[mint] = balance
 				tokenDecimals[mint] = monitor.DefaultTokenDecimals
 			}
-			msg = fmt.Sprintf("New wallet %s detected with %d tokens:\n%s",
+			msg = fmt.Sprintf("发现新钱包 %s，包含 %d 个资产：\n%s",
 				change.WalletAddress,
 				len(change.TokenBalances),
 				strings.Join(tokenDetails, "\n"))
@@ -235,7 +224,7 @@ func processChanges(changes []monitor.Change, alerter alerts.Alerter, alertCfg c
 			}
 
 		case "new_token":
-			msg = fmt.Sprintf("New token %s (%s) detected in wallet with initial balance %d",
+			msg = fmt.Sprintf("钱包中发现新资产 %s (%s)，初始余额 %d",
 				change.TokenSymbol, change.TokenMint, change.NewBalance)
 			level = alerts.Warning
 			alertData = map[string]interface{}{
@@ -245,7 +234,7 @@ func processChanges(changes []monitor.Change, alerter alerts.Alerter, alertCfg c
 			}
 
 		case "balance_change":
-			msg = fmt.Sprintf("Balance change for %s (%s): from %d to %d (%.2f%%)",
+			msg = fmt.Sprintf("%s (%s) 余额变化：%d -> %d（%.2f%%）",
 				change.TokenSymbol, change.TokenMint,
 				change.OldBalance, change.NewBalance, change.ChangePercent)
 
@@ -266,11 +255,15 @@ func processChanges(changes []monitor.Change, alerter alerts.Alerter, alertCfg c
 				"symbol":         change.TokenSymbol,
 				"change_percent": change.ChangePercent,
 			}
+		default:
+			continue
 		}
 
-		if level >= alerts.Warning {
+		if level == alerts.Warning || level == alerts.Critical {
 			alert := alerts.Alert{
 				Timestamp:     time.Now(),
+				ChainName:     change.ChainName,
+				ChainType:     change.ChainType,
 				WalletAddress: change.WalletAddress,
 				TokenMint:     change.TokenMint,
 				AlertType:     change.ChangeType,
@@ -280,10 +273,10 @@ func processChanges(changes []monitor.Change, alerter alerts.Alerter, alertCfg c
 			}
 
 			if err := alerter.SendAlert(alert); err != nil {
-				logger.Error("Failed to send alert: %v", err)
+				logger.Error("发送提醒失败：%v", err)
 			}
 		} else {
-			logger.Info(msg)
+			logger.Info("%s", msg)
 		}
 	}
 }

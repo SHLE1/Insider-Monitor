@@ -117,15 +117,23 @@ func (d *DiscordAlerter) SendAlert(alert Alert) error {
 	}
 
 	// Add wallet address as a field
+	if alert.ChainName != "" {
+		fields = append(fields, field{
+			Name:   "链",
+			Value:  fmt.Sprintf("`%s`", alert.ChainName),
+			Inline: true,
+		})
+	}
+
 	fields = append(fields, field{
-		Name:   "Wallet",
+		Name:   "钱包",
 		Value:  fmt.Sprintf("`%s`", alert.WalletAddress),
 		Inline: false,
 	})
 
 	// Add timestamp
 	fields = append(fields, field{
-		Name:   "Time",
+		Name:   "时间",
 		Value:  alert.Timestamp.Format("2006-01-02 15:04:05 MST"),
 		Inline: true,
 	})

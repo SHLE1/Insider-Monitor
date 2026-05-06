@@ -335,17 +335,17 @@ func TestFormatPortfolioValue(t *testing.T) {
 		{
 			name:     "Small value",
 			value:    123.45,
-			expected: "\033[1m\033[32mTOTAL PORTFOLIO VALUE: $123.45\033[0m",
+			expected: "\033[1m\033[32m总持仓价值：$123.45\033[0m",
 		},
 		{
 			name:     "Thousand",
 			value:    1234.56,
-			expected: "\033[1m\033[32mTOTAL PORTFOLIO VALUE: $1.23K\033[0m",
+			expected: "\033[1m\033[32m总持仓价值：$1.23K\033[0m",
 		},
 		{
 			name:     "Million",
 			value:    1234567.89,
-			expected: "\033[1m\033[32mTOTAL PORTFOLIO VALUE: $1.23M\033[0m",
+			expected: "\033[1m\033[32m总持仓价值：$1.23M\033[0m",
 		},
 	}
 

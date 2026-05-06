@@ -1,29 +1,56 @@
 {
-    "_comment": "⚠️ IMPORTANT: Replace the network_url below with your dedicated RPC endpoint!",
-    "_comment_rpc": "Get a free RPC from: Helius (helius.dev), QuickNode (quicknode.com), or Triton (triton.one)",
-    "network_url": "YOUR_DEDICATED_RPC_URL_HERE",
-    "wallets": [
-        "CvQk2xkXtiMj2JqqVx1YZkeSqQ7jyQkNqqjeNE1jPTfc",
-        "FjmRj8y9xfDaj5Aygq88t5jAFbpxrbZ16JNPPG1sx9FQ",
-        "6AwqhVU5rx3sMovgCwc5KE1prBZaZZJSGgYSKmX8qg31"
-    ],
-    "scan_interval": "1m",
-    "alerts": {
-        "minimum_balance": 1000,
-        "significant_change": 0.20,
-        "ignore_tokens": []
+  "_comment": "Use environment variables for secrets when possible: BSC_RPC_URL, SOLANA_RPC_URL, TELEGRAM_BOT_TOKEN, DISCORD_WEBHOOK_URL",
+  "scan_interval": "1m",
+  "alerts": {
+    "minimum_balance": 1000,
+    "significant_change": 20,
+    "ignore_tokens": []
+  },
+  "discord": {
+    "enabled": false,
+    "webhook_url": "${DISCORD_WEBHOOK_URL}",
+    "channel_id": ""
+  },
+  "telegram": {
+    "enabled": false,
+    "bot_token": "${TELEGRAM_BOT_TOKEN}",
+    "chat_id": "${TELEGRAM_CHAT_ID}"
+  },
+  "chains": [
+    {
+      "type": "evm",
+      "name": "BSC",
+      "rpc_url": "${BSC_RPC_URL}",
+      "chain_id": 56,
+      "native_symbol": "BNB",
+      "wallets": [
+        "0x0000000000000000000000000000000000000000"
+      ],
+      "scan": {
+        "scan_mode": "whitelist",
+        "include_tokens": [],
+        "exclude_tokens": [],
+        "tokens": [
+          {
+            "address": "0x55d398326f99059fF775485246999027B3197955",
+            "symbol": "USDT",
+            "decimals": 18
+          }
+        ]
+      }
     },
-    "discord": {
-        "enabled": false,
-        "webhook_url": "",
-        "channel_id": ""
-    },
-    "scan": {
+    {
+      "type": "solana",
+      "name": "Solana",
+      "rpc_url": "${SOLANA_RPC_URL}",
+      "wallets": [
+        "CvQk2xkXtiMj2JqqVx1YZkeSqQ7jyQkNqqjeNE1jPTfc"
+      ],
+      "scan": {
         "scan_mode": "all",
-        "include_tokens": [
-            "TokenAddressHere",
-            "AnotherTokenAddress"
-        ],
+        "include_tokens": [],
         "exclude_tokens": []
+      }
     }
+  ]
 }

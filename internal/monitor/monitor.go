@@ -49,21 +49,33 @@ type WalletMonitor struct {
 	client       *rpc.Client
 	wallets      []solana.PublicKey
 	networkURL   string
+	chainName    string
+	chainType    string
 	isConnected  bool
 	scanConfig   *config.ScanConfig
 	priceService *price.JupiterPrice
 }
 
 func NewWalletMonitor(networkURL string, wallets []string, scanConfig *config.ScanConfig) (*WalletMonitor, error) {
+	return NewSolanaMonitor(config.ChainConfig{
+		Type:    config.ChainTypeSolana,
+		Name:    "Solana",
+		RPCURL:  networkURL,
+		Wallets: wallets,
+		Scan:    derefScanConfig(scanConfig),
+	})
+}
+
+func NewSolanaMonitor(chain config.ChainConfig) (*WalletMonitor, error) {
 	client := rpc.NewWithCustomRPCClient(rpc.NewWithLimiter(
-		networkURL,
+		chain.RPCURL,
 		4,
 		1,
 	))
 
 	// Convert wallet addresses to PublicKeys
-	pubKeys := make([]solana.PublicKey, len(wallets))
-	for i, addr := range wallets {
+	pubKeys := make([]solana.PublicKey, len(chain.Wallets))
+	for i, addr := range chain.Wallets {
 		pubKey, err := solana.PublicKeyFromBase58(addr)
 		if err != nil {
 			return nil, fmt.Errorf("invalid wallet address %s: %v", addr, err)
@@ -74,10 +86,19 @@ func NewWalletMonitor(networkURL string, wallets []string, scanConfig *config.Sc
 	return &WalletMonitor{
 		client:       client,
 		wallets:      pubKeys,
-		networkURL:   networkURL,
-		scanConfig:   scanConfig,
+		networkURL:   chain.RPCURL,
+		chainName:    chain.Name,
+		chainType:    config.ChainTypeSolana,
+		scanConfig:   &chain.Scan,
 		priceService: price.NewJupiterPrice(),
 	}, nil
+}
+
+func derefScanConfig(scanConfig *config.ScanConfig) config.ScanConfig {
+	if scanConfig == nil {
+		return config.ScanConfig{}
+	}
+	return *scanConfig
 }
 
 // Simplified TokenAccountInfo
@@ -86,6 +107,7 @@ type TokenAccountInfo struct {
 	LastUpdated     time.Time `json:"last_updated"`
 	Symbol          string    `json:"symbol"`
 	Decimals        uint8     `json:"decimals"`
+	Configured      bool      `json:"configured,omitempty"`
 	USDPrice        float64   `json:"usd_price"`
 	USDValue        float64   `json:"usd_value"`
 	ConfidenceLevel string    `json:"confidence_level"`
@@ -93,9 +115,18 @@ type TokenAccountInfo struct {
 
 // Simplified WalletData
 type WalletData struct {
+	ChainName     string                      `json:"chain_name"`
+	ChainType     string                      `json:"chain_type"`
 	WalletAddress string                      `json:"wallet_address"`
 	TokenAccounts map[string]TokenAccountInfo `json:"token_accounts"` // mint -> info
 	LastScanned   time.Time                   `json:"last_scanned"`
+}
+
+func WalletDataKey(chainName, walletAddress string) string {
+	if chainName == "" {
+		return walletAddress
+	}
+	return chainName + ":" + walletAddress
 }
 
 // Add these constants for retry configuration
@@ -217,6 +248,8 @@ func (w *WalletMonitor) shouldIncludeToken(mint string) bool {
 
 func (w *WalletMonitor) GetWalletData(wallet solana.PublicKey) (*WalletData, error) {
 	walletData := &WalletData{
+		ChainName:     w.chainName,
+		ChainType:     w.chainType,
 		WalletAddress: wallet.String(),
 		TokenAccounts: make(map[string]TokenAccountInfo),
 		LastScanned:   time.Now(),
@@ -257,6 +290,8 @@ func (w *WalletMonitor) GetWalletData(wallet solana.PublicKey) (*WalletData, err
 
 // Add these type definitions
 type Change struct {
+	ChainName     string
+	ChainType     string
 	WalletAddress string
 	TokenMint     string
 	TokenSymbol   string // Add symbol
@@ -343,7 +378,7 @@ func (w *WalletMonitor) ScanAllWallets() (map[string]*WalletData, error) {
 				// Return the error to propagate the enhanced error messages
 				return nil, fmt.Errorf("failed to scan wallet %s: %w", wallet.String(), err)
 			}
-			results[wallet.String()] = data
+			results[WalletDataKey(data.ChainName, data.WalletAddress)] = data
 		}
 
 		// Small delay between batches to be nice to the RPC
@@ -371,8 +406,13 @@ func DetectChanges(oldData, newData map[string]*WalletData, significantChange fl
 			oldInfo, existed := oldWalletData.TokenAccounts[mint]
 
 			if !existed {
+				if newInfo.Configured {
+					continue
+				}
 				// New token detected
 				changes = append(changes, Change{
+					ChainName:     newWalletData.ChainName,
+					ChainType:     newWalletData.ChainType,
 					WalletAddress: walletAddr,
 					TokenMint:     mint,
 					TokenSymbol:   newInfo.Symbol,
@@ -389,6 +429,8 @@ func DetectChanges(oldData, newData map[string]*WalletData, significantChange fl
 
 			if absChange >= significantChange {
 				changes = append(changes, Change{
+					ChainName:     newWalletData.ChainName,
+					ChainType:     newWalletData.ChainType,
 					WalletAddress: walletAddr,
 					TokenMint:     mint,
 					TokenSymbol:   newInfo.Symbol,
@@ -429,13 +471,13 @@ func formatTokenAmount(amount uint64, decimals uint8) string {
 // FormatWalletOverview returns a compact string representation of wallet holdings
 func FormatWalletOverview(data map[string]*WalletData) string {
 	var overview strings.Builder
-	overview.WriteString("\nWallet Holdings Overview:\n")
+	overview.WriteString("\n钱包持仓概览：\n")
 	overview.WriteString("------------------------\n")
 
 	for _, wallet := range data {
 		overview.WriteString(fmt.Sprintf("📍 %s\n", wallet.WalletAddress))
 		if len(wallet.TokenAccounts) == 0 {
-			overview.WriteString("   No tokens found\n")
+			overview.WriteString("   未发现 Token\n")
 			continue
 		}
 
@@ -472,7 +514,7 @@ func FormatWalletOverview(data map[string]*WalletData) string {
 		// Show how many more tokens if any
 		remaining := len(holdings) - maxDisplay
 		if remaining > 0 {
-			overview.WriteString(fmt.Sprintf("   ... and %d more tokens\n", remaining))
+			overview.WriteString(fmt.Sprintf("   ... 还有 %d 个 Token\n", remaining))
 		}
 		overview.WriteString("\n")
 	}
@@ -605,11 +647,11 @@ func formatWalletValue(totalValue float64) string {
 // formatPortfolioValue formats the total portfolio value for display
 func formatPortfolioValue(totalValue float64) string {
 	if totalValue >= 1000000 {
-		return fmt.Sprintf("%s%sTOTAL PORTFOLIO VALUE: $%.2fM%s", colorBold, colorGreen, totalValue/1000000, colorReset)
+		return fmt.Sprintf("%s%s总持仓价值：$%.2fM%s", colorBold, colorGreen, totalValue/1000000, colorReset)
 	} else if totalValue >= 1000 {
-		return fmt.Sprintf("%s%sTOTAL PORTFOLIO VALUE: $%.2fK%s", colorBold, colorGreen, totalValue/1000, colorReset)
+		return fmt.Sprintf("%s%s总持仓价值：$%.2fK%s", colorBold, colorGreen, totalValue/1000, colorReset)
 	} else {
-		return fmt.Sprintf("%s%sTOTAL PORTFOLIO VALUE: $%.2f%s", colorBold, colorGreen, totalValue, colorReset)
+		return fmt.Sprintf("%s%s总持仓价值：$%.2f%s", colorBold, colorGreen, totalValue, colorReset)
 	}
 }
 
@@ -649,7 +691,7 @@ func displayTokenHolding(tokenInfo TokenInfo) {
 // DisplayWalletOverview displays a formatted overview of wallet holdings
 func (m *WalletMonitor) DisplayWalletOverview(walletDataMap map[string]*WalletData) {
 	fmt.Println()
-	fmt.Printf("%s%s SOLANA WALLET MONITOR %s\n", colorBold, colorPurple, colorReset)
+	fmt.Printf("%s%s SOLANA 钱包监控 %s\n", colorBold, colorPurple, colorReset)
 	fmt.Printf("%s%s %s\n\n", colorPurple, divider, colorReset)
 
 	// Update prices for all tokens in all wallets
@@ -660,9 +702,9 @@ func (m *WalletMonitor) DisplayWalletOverview(walletDataMap map[string]*WalletDa
 	for _, wallet := range m.wallets {
 		fmt.Printf("%s%s %s %s%s\n", colorBold, colorBlue, walletSymbol, wallet.String(), colorReset)
 
-		walletData, exists := walletDataMap[wallet.String()]
+		walletData, exists := walletDataMap[WalletDataKey(m.chainName, wallet.String())]
 		if !exists {
-			fmt.Printf("   %sNo data available%s\n\n", colorYellow, colorReset)
+			fmt.Printf("   %s暂无数据%s\n\n", colorYellow, colorReset)
 			continue
 		}
 
@@ -678,7 +720,7 @@ func (m *WalletMonitor) DisplayWalletOverview(walletDataMap map[string]*WalletDa
 		// Show wallet total
 		if walletTotalValue > 0 {
 			valueStr := formatWalletValue(walletTotalValue)
-			fmt.Printf("   %s%sTotal Value: %s%s\n", colorBold, colorGreen, valueStr, colorReset)
+			fmt.Printf("   %s%s总价值：%s%s\n", colorBold, colorGreen, valueStr, colorReset)
 		}
 
 		// Display top holdings
@@ -687,7 +729,7 @@ func (m *WalletMonitor) DisplayWalletOverview(walletDataMap map[string]*WalletDa
 		}
 
 		if len(holdings) > MaxDisplayHoldings {
-			fmt.Printf("   %s %s%d more tokens%s\n", moreSymbol, colorYellow, len(holdings)-MaxDisplayHoldings, colorReset)
+			fmt.Printf("   %s %s还有 %d 个 Token%s\n", moreSymbol, colorYellow, len(holdings)-MaxDisplayHoldings, colorReset)
 		}
 		fmt.Println()
 	}
@@ -699,7 +741,7 @@ func (m *WalletMonitor) DisplayWalletOverview(walletDataMap map[string]*WalletDa
 	}
 
 	fmt.Printf("%s%s %s\n", colorPurple, divider, colorReset)
-	fmt.Printf("%sLast updated: %s%s\n\n", colorYellow, time.Now().Format("2006-01-02 15:04:05"), colorReset)
+	fmt.Printf("%s更新时间：%s%s\n\n", colorYellow, time.Now().Format("2006-01-02 15:04:05"), colorReset)
 }
 
 // Helper function to lookup well-known token names
