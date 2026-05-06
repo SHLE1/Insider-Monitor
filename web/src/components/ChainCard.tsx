@@ -120,6 +120,12 @@ function SecretValueField({
 
 export function ChainCard({ index, chain, onChange, onRemove }: Props) {
 	const [open, setOpen] = useState(true);
+	const [walletText, setWalletText] = useState(() =>
+		walletsToText(chain.wallets),
+	);
+	const [tokenText, setTokenText] = useState(() =>
+		tokensToText(chain.scan?.tokens ?? []),
+	);
 
 	const update = (patch: Partial<ChainConfig>) =>
 		onChange({ ...chain, ...patch });
@@ -251,10 +257,12 @@ export function ChainCard({ index, chain, onChange, onRemove }: Props) {
 						<Textarea
 							placeholder="每行一个地址"
 							className="font-mono text-xs min-h-24 resize-y"
-							value={walletsToText(chain.wallets)}
-							onChange={(e) =>
-								update({ wallets: textToWallets(e.target.value) })
-							}
+							value={walletText}
+							onChange={(e) => {
+								const value = e.target.value;
+								setWalletText(value);
+								update({ wallets: textToWallets(value) });
+							}}
 						/>
 					</div>
 
@@ -269,16 +277,18 @@ export function ChainCard({ index, chain, onChange, onRemove }: Props) {
 						<Textarea
 							placeholder={`每行一个：address,symbol,decimals\n例：0xabc...,USDT,6`}
 							className="font-mono text-xs min-h-24 resize-y"
-							value={tokensToText(chain.scan?.tokens ?? [])}
-							onChange={(e) =>
+							value={tokenText}
+							onChange={(e) => {
+								const value = e.target.value;
+								setTokenText(value);
 								update({
 									scan: {
 										...chain.scan,
 										scan_mode: "whitelist",
-										tokens: textToTokens(e.target.value),
+										tokens: textToTokens(value),
 									},
-								})
-							}
+								});
+							}}
 						/>
 					</div>
 				</CardContent>

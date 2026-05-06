@@ -117,6 +117,79 @@ func TestEVMEnrichPricesWritesUSDFields(t *testing.T) {
 	}
 }
 
+func TestEVMEnrichChangesFindsRecentTransferLog(t *testing.T) {
+	wallet := "0x1111111111111111111111111111111111111111"
+	sender := "0x3333333333333333333333333333333333333333"
+	token := "0x2222222222222222222222222222222222222222"
+	txHash := "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req rpcRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatal(err)
+		}
+
+		switch req.Method {
+		case "eth_blockNumber":
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"jsonrpc": "2.0",
+				"id":      req.ID,
+				"result":  "0x100",
+			})
+		case "eth_getLogs":
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"jsonrpc": "2.0",
+				"id":      req.ID,
+				"result": []map[string]interface{}{
+					{
+						"address":          token,
+						"topics":           []string{erc20TransferTopic, addressToTopic(sender), addressToTopic(wallet)},
+						"data":             "0x3e8",
+						"transactionHash":  txHash,
+						"blockNumber":      "0xff",
+						"transactionIndex": "0x1",
+						"logIndex":         "0x1",
+					},
+				},
+			})
+		default:
+			t.Fatalf("unexpected rpc method %s", req.Method)
+		}
+	}))
+	defer server.Close()
+
+	mon, err := NewEVMMonitor(config.ChainConfig{
+		Type:    config.ChainTypeEVM,
+		Name:    "BSC",
+		RPCURL:  server.URL,
+		ChainID: 56,
+		Wallets: []string{wallet},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	changes := mon.EnrichChanges([]Change{{
+		ChainName:     "BSC",
+		ChainType:     config.ChainTypeEVM,
+		WalletAddress: wallet,
+		TokenMint:     token,
+		ChangeType:    "balance_change",
+		Direction:     "流入",
+		AmountChanged: 1000,
+	}})
+
+	if len(changes) != 1 {
+		t.Fatalf("expected one change, got %d", len(changes))
+	}
+	if changes[0].TxHash != txHash {
+		t.Fatalf("expected tx hash %s, got %s", txHash, changes[0].TxHash)
+	}
+	if !strings.EqualFold(changes[0].FromAddress, sender) || !strings.EqualFold(changes[0].ToAddress, wallet) {
+		t.Fatalf("expected transfer addresses, got from=%s to=%s", changes[0].FromAddress, changes[0].ToAddress)
+	}
+}
+
 func TestDetectChangesIncludesChain(t *testing.T) {
 	oldData := map[string]*WalletData{
 		"BSC:wallet1": {

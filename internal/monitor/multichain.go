@@ -11,6 +11,10 @@ type Scanner interface {
 	DisplayWalletOverview(walletDataMap map[string]*WalletData)
 }
 
+type ChangeEnricher interface {
+	EnrichChanges(changes []Change) []Change
+}
+
 type MultiChainMonitor struct {
 	scanners []Scanner
 }
@@ -56,4 +60,16 @@ func (m *MultiChainMonitor) DisplayWalletOverview(walletDataMap map[string]*Wall
 	for _, scanner := range m.scanners {
 		scanner.DisplayWalletOverview(walletDataMap)
 	}
+}
+
+func (m *MultiChainMonitor) EnrichChanges(changes []Change) []Change {
+	enriched := changes
+	for _, scanner := range m.scanners {
+		enricher, ok := scanner.(ChangeEnricher)
+		if !ok {
+			continue
+		}
+		enriched = enricher.EnrichChanges(enriched)
+	}
+	return enriched
 }

@@ -37,6 +37,44 @@ type rpcResponse struct {
 	Error  json.RawMessage `json:"error,omitempty"`
 }
 
+type rpcRawResponse struct {
+	Result json.RawMessage `json:"result"`
+	Error  json.RawMessage `json:"error,omitempty"`
+}
+
+type evmLog struct {
+	Address          string   `json:"address"`
+	Topics           []string `json:"topics"`
+	Data             string   `json:"data"`
+	TransactionHash  string   `json:"transactionHash"`
+	BlockNumber      string   `json:"blockNumber"`
+	TransactionIndex string   `json:"transactionIndex"`
+	LogIndex         string   `json:"logIndex"`
+}
+
+type transferMatch struct {
+	TxHash string
+	From   string
+	To     string
+	Amount uint64
+}
+
+type TokenTransfer struct {
+	TxHash      string `json:"tx_hash"`
+	From        string `json:"from"`
+	To          string `json:"to"`
+	Amount      uint64 `json:"amount"`
+	RawAmount   string `json:"raw_amount"`
+	Direction   string `json:"direction"`
+	BlockNumber uint64 `json:"block_number"`
+	LogIndex    uint64 `json:"log_index"`
+}
+
+const (
+	erc20TransferTopic = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+	defaultLogLookback = uint64(5)
+)
+
 func NewEVMMonitor(chain config.ChainConfig) (*EVMMonitor, error) {
 	return &EVMMonitor{
 		chain: chain,
@@ -62,6 +100,96 @@ func (m *EVMMonitor) ScanAllWallets() (map[string]*WalletData, error) {
 	}
 	m.enrichPrices(results)
 	return results, nil
+}
+
+func (m *EVMMonitor) EnrichChanges(changes []Change) []Change {
+	for i := range changes {
+		change := &changes[i]
+		if change.ChainName != m.chain.Name || change.ChainType != config.ChainTypeEVM {
+			continue
+		}
+		if change.ChangeType != "balance_change" || change.TokenMint == nativeAssetAddress {
+			continue
+		}
+		match, err := m.findRecentTransfer(*change)
+		if err != nil {
+			continue
+		}
+		change.TxHash = match.TxHash
+		change.FromAddress = match.From
+		change.ToAddress = match.To
+	}
+	return changes
+}
+
+func (m *EVMMonitor) RecentTokenTransfers(walletAddress, tokenAddress string, limit int) ([]TokenTransfer, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	currentBlock, err := m.currentBlockNumber()
+	if err != nil {
+		return nil, err
+	}
+	fromBlock := uint64(0)
+	if currentBlock > defaultLogLookback {
+		fromBlock = currentBlock - defaultLogLookback
+	}
+
+	walletTopic := addressToTopic(walletAddress)
+	inLogs, inErr := m.getTransferLogs(tokenAddress, fromBlock, currentBlock, []interface{}{erc20TransferTopic, nil, walletTopic})
+	outLogs, outErr := m.getTransferLogs(tokenAddress, fromBlock, currentBlock, []interface{}{erc20TransferTopic, walletTopic})
+	if inErr != nil && outErr != nil {
+		return nil, inErr
+	}
+
+	transfers := make([]TokenTransfer, 0, len(inLogs)+len(outLogs))
+	for _, log := range inLogs {
+		if transfer, ok := tokenTransferFromLog(log, walletAddress); ok {
+			transfers = append(transfers, transfer)
+		}
+	}
+	for _, log := range outLogs {
+		if transfer, ok := tokenTransferFromLog(log, walletAddress); ok {
+			transfers = append(transfers, transfer)
+		}
+	}
+	sort.Slice(transfers, func(i, j int) bool {
+		if transfers[i].BlockNumber == transfers[j].BlockNumber {
+			return transfers[i].LogIndex > transfers[j].LogIndex
+		}
+		return transfers[i].BlockNumber > transfers[j].BlockNumber
+	})
+	if len(transfers) > limit {
+		transfers = transfers[:limit]
+	}
+	return transfers, nil
+}
+
+func tokenTransferFromLog(log evmLog, walletAddress string) (TokenTransfer, bool) {
+	match, ok := transferFromLog(log)
+	if !ok {
+		return TokenTransfer{}, false
+	}
+	amount, err := hexToBigInt(log.Data)
+	if err != nil {
+		return TokenTransfer{}, false
+	}
+	blockNumber, _ := hexToBigInt(log.BlockNumber)
+	logIndex, _ := hexToBigInt(log.LogIndex)
+	direction := "流入"
+	if strings.EqualFold(match.From, walletAddress) {
+		direction = "流出"
+	}
+	return TokenTransfer{
+		TxHash:      match.TxHash,
+		From:        match.From,
+		To:          match.To,
+		Amount:      match.Amount,
+		RawAmount:   amount.String(),
+		Direction:   direction,
+		BlockNumber: blockNumber.Uint64(),
+		LogIndex:    logIndex.Uint64(),
+	}, true
 }
 
 func (m *EVMMonitor) GetWalletData(wallet string) (*WalletData, error) {
@@ -237,14 +365,17 @@ func (m *EVMMonitor) getTokenInfo(wallet string, token config.TokenConfig) (Toke
 	if err != nil {
 		return TokenAccountInfo{}, err
 	}
+	totalSupply, _ := m.callTotalSupply(token.Address)
 
 	return TokenAccountInfo{
-		Balance:     bigToUint64(balance),
-		RawBalance:  balance.String(),
-		LastUpdated: time.Now(),
-		Symbol:      symbol,
-		Decimals:    decimals,
-		Configured:  true,
+		Balance:        bigToUint64(balance),
+		RawBalance:     balance.String(),
+		TotalSupplyRaw: totalSupply.String(),
+		HoldingPercent: holdingPercent(balance, totalSupply),
+		LastUpdated:    time.Now(),
+		Symbol:         symbol,
+		Decimals:       decimals,
+		Configured:     true,
 	}, nil
 }
 
@@ -254,6 +385,14 @@ func (m *EVMMonitor) callBalanceOf(contractAddress, wallet string) (*big.Int, er
 	result, err := m.ethCall(contractAddress, data)
 	if err != nil {
 		return nil, err
+	}
+	return hexToBigInt(result)
+}
+
+func (m *EVMMonitor) callTotalSupply(contractAddress string) (*big.Int, error) {
+	result, err := m.ethCall(contractAddress, "0x18160ddd")
+	if err != nil {
+		return big.NewInt(0), err
 	}
 	return hexToBigInt(result)
 }
@@ -286,6 +425,21 @@ func (m *EVMMonitor) ethCall(to, data string) (string, error) {
 }
 
 func (m *EVMMonitor) rpcCall(method string, params []interface{}) (string, error) {
+	raw, err := m.rpcRawCall(method, params)
+	if err != nil {
+		return "", err
+	}
+	var result string
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return "", err
+	}
+	if result == "" {
+		return "", fmt.Errorf("RPC returned empty result")
+	}
+	return result, nil
+}
+
+func (m *EVMMonitor) rpcRawCall(method string, params []interface{}) (json.RawMessage, error) {
 	payload, err := json.Marshal(rpcRequest{
 		JSONRPC: "2.0",
 		Method:  method,
@@ -293,34 +447,142 @@ func (m *EVMMonitor) rpcCall(method string, params []interface{}) (string, error
 		ID:      1,
 	})
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	resp, err := m.httpClient.Post(m.chain.RPCURL, "application/json", bytes.NewReader(payload))
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("RPC returned status %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("RPC returned status %d: %s", resp.StatusCode, string(body))
 	}
 
-	var parsed rpcResponse
+	var parsed rpcRawResponse
 	if err := json.Unmarshal(body, &parsed); err != nil {
-		return "", err
+		return nil, err
 	}
 	if len(parsed.Error) > 0 && string(parsed.Error) != "null" {
-		return "", fmt.Errorf("RPC error: %s", string(parsed.Error))
+		return nil, fmt.Errorf("RPC error: %s", string(parsed.Error))
 	}
-	if parsed.Result == "" {
-		return "", fmt.Errorf("RPC returned empty result")
+	if len(parsed.Result) == 0 || string(parsed.Result) == "null" {
+		return nil, fmt.Errorf("RPC returned empty result")
 	}
 	return parsed.Result, nil
+}
+
+func (m *EVMMonitor) findRecentTransfer(change Change) (transferMatch, error) {
+	currentBlock, err := m.currentBlockNumber()
+	if err != nil {
+		return transferMatch{}, err
+	}
+	fromBlock := uint64(0)
+	if currentBlock > defaultLogLookback {
+		fromBlock = currentBlock - defaultLogLookback
+	}
+
+	walletTopic := addressToTopic(change.WalletAddress)
+	var logs []evmLog
+	switch change.Direction {
+	case "流入":
+		logs, err = m.getTransferLogs(change.TokenMint, fromBlock, currentBlock, []interface{}{erc20TransferTopic, nil, walletTopic})
+	case "流出":
+		logs, err = m.getTransferLogs(change.TokenMint, fromBlock, currentBlock, []interface{}{erc20TransferTopic, walletTopic})
+	default:
+		inLogs, inErr := m.getTransferLogs(change.TokenMint, fromBlock, currentBlock, []interface{}{erc20TransferTopic, nil, walletTopic})
+		outLogs, outErr := m.getTransferLogs(change.TokenMint, fromBlock, currentBlock, []interface{}{erc20TransferTopic, walletTopic})
+		if inErr != nil && outErr != nil {
+			return transferMatch{}, inErr
+		}
+		logs = append(inLogs, outLogs...)
+	}
+	if err != nil {
+		return transferMatch{}, err
+	}
+
+	var fallback *transferMatch
+	for i := len(logs) - 1; i >= 0; i-- {
+		match, ok := transferFromLog(logs[i])
+		if !ok {
+			continue
+		}
+		if fallback == nil {
+			copy := match
+			fallback = &copy
+		}
+		if change.AmountChanged > 0 && match.Amount == change.AmountChanged {
+			return match, nil
+		}
+	}
+	if fallback != nil {
+		return *fallback, nil
+	}
+	return transferMatch{}, fmt.Errorf("no matching transfer log found")
+}
+
+func (m *EVMMonitor) currentBlockNumber() (uint64, error) {
+	result, err := m.rpcCall("eth_blockNumber", []interface{}{})
+	if err != nil {
+		return 0, err
+	}
+	value, err := hexToBigInt(result)
+	if err != nil {
+		return 0, err
+	}
+	return value.Uint64(), nil
+}
+
+func (m *EVMMonitor) getTransferLogs(tokenAddress string, fromBlock, toBlock uint64, topics []interface{}) ([]evmLog, error) {
+	filter := map[string]interface{}{
+		"address":   tokenAddress,
+		"fromBlock": fmt.Sprintf("0x%x", fromBlock),
+		"toBlock":   fmt.Sprintf("0x%x", toBlock),
+		"topics":    topics,
+	}
+	raw, err := m.rpcRawCall("eth_getLogs", []interface{}{filter})
+	if err != nil {
+		return nil, err
+	}
+	var logs []evmLog
+	if err := json.Unmarshal(raw, &logs); err != nil {
+		return nil, err
+	}
+	return logs, nil
+}
+
+func transferFromLog(log evmLog) (transferMatch, bool) {
+	if len(log.Topics) < 3 {
+		return transferMatch{}, false
+	}
+	amount, err := hexToBigInt(log.Data)
+	if err != nil {
+		return transferMatch{}, false
+	}
+	return transferMatch{
+		TxHash: log.TransactionHash,
+		From:   topicToAddress(log.Topics[1]),
+		To:     topicToAddress(log.Topics[2]),
+		Amount: bigToUint64(amount),
+	}, true
+}
+
+func addressToTopic(address string) string {
+	clean := strings.TrimPrefix(strings.ToLower(address), "0x")
+	return "0x" + strings.Repeat("0", 24) + clean
+}
+
+func topicToAddress(topic string) string {
+	clean := strings.TrimPrefix(strings.ToLower(topic), "0x")
+	if len(clean) < 40 {
+		return "0x" + clean
+	}
+	return "0x" + clean[len(clean)-40:]
 }
 
 func hexToBigInt(value string) (*big.Int, error) {
@@ -343,6 +605,16 @@ func bigToUint64(value *big.Int) uint64 {
 		return math.MaxUint64
 	}
 	return value.Uint64()
+}
+
+func holdingPercent(balance, totalSupply *big.Int) float64 {
+	if balance == nil || totalSupply == nil || totalSupply.Sign() == 0 {
+		return 0
+	}
+	ratio := new(big.Float).Quo(new(big.Float).SetInt(balance), new(big.Float).SetInt(totalSupply))
+	ratio.Mul(ratio, big.NewFloat(100))
+	value, _ := ratio.Float64()
+	return math.Round(value*10000) / 10000
 }
 
 func decodeABIString(hexValue string) (string, error) {

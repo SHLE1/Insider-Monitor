@@ -22,6 +22,10 @@ type WalletScanner interface {
 	DisplayWalletOverview(walletDataMap map[string]*monitor.WalletData)
 }
 
+type ChangeEnricher interface {
+	EnrichChanges(changes []monitor.Change) []monitor.Change
+}
+
 func main() {
 	logger := utils.NewLogger(false)
 
@@ -170,6 +174,9 @@ func runMonitor(scanner WalletScanner, alerter alerts.Alerter, cfg *config.Confi
 
 				if len(previousData) > 0 {
 					changes := monitor.DetectChanges(previousData, newResults, cfg.Alerts.SignificantChange)
+					if enricher, ok := scanner.(ChangeEnricher); ok {
+						changes = enricher.EnrichChanges(changes)
+					}
 					processChanges(changes, alerter, cfg.Alerts, logger)
 				} else {
 					logger.Info("首次扫描完成，已保存基线数据")
@@ -234,8 +241,12 @@ func processChanges(changes []monitor.Change, alerter alerts.Alerter, alertCfg c
 			}
 
 		case "balance_change":
-			msg = fmt.Sprintf("%s (%s) 余额变化：%d -> %d（%.2f%%）",
-				change.TokenSymbol, change.TokenMint,
+			direction := change.Direction
+			if direction == "" {
+				direction = "变动"
+			}
+			msg = fmt.Sprintf("%s %s %d，余额 %d -> %d（%.2f%%）",
+				change.TokenSymbol, direction, change.AmountChanged,
 				change.OldBalance, change.NewBalance, change.ChangePercent)
 
 			absChange := abs(change.ChangePercent)
@@ -249,11 +260,18 @@ func processChanges(changes []monitor.Change, alerter alerts.Alerter, alertCfg c
 			}
 
 			alertData = map[string]interface{}{
-				"old_balance":    change.OldBalance,
-				"new_balance":    change.NewBalance,
-				"decimals":       change.TokenDecimals,
-				"symbol":         change.TokenSymbol,
-				"change_percent": change.ChangePercent,
+				"old_balance":     change.OldBalance,
+				"new_balance":     change.NewBalance,
+				"decimals":        change.TokenDecimals,
+				"symbol":          change.TokenSymbol,
+				"change_percent":  change.ChangePercent,
+				"amount_changed":  change.AmountChanged,
+				"direction":       direction,
+				"old_holding_pct": change.OldHoldingPct,
+				"new_holding_pct": change.NewHoldingPct,
+				"tx_hash":         change.TxHash,
+				"from_address":    change.FromAddress,
+				"to_address":      change.ToAddress,
 			}
 		default:
 			continue

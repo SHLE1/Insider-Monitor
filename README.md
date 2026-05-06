@@ -19,8 +19,10 @@ Join our Discord community to:
 - 🔍 Monitor multiple Solana and EVM/BSC wallets simultaneously
 - 💰 Track native coin and token balance changes
 - ⚡ Real-time alerts for significant changes
+- 📊 EVM/BSC 代币余额变化支持 alpha 风格通知，包含流入/流出方向与持仓占比变化
 - 🔔 Console, Discord, and Telegram notifications
 - 🧭 Local browser-based configuration editor
+- 🖥️ Web UI 可点击 Token 查看实时交易追踪，达到阈值时页面高亮并发送通知
 - 💾 Persistent storage of wallet data
 - 💵 Persist estimated USD price/value fields for scanned token holdings so the local dashboard can display portfolio value
 - 🛡️ Graceful handling of network interruptions
@@ -151,6 +153,8 @@ cp config.example.json config.json
 
 3. **Get your RPC endpoint** from the [providers listed above](#-recommended-rpc-providers-free-tiers-available) and update `rpc_url`
 
+> 本地配置和运行记录不会提交到 Git：`config.json`、`.env`、`data/`、`tmp/`、`*.log` 以及本地工具状态 `.pi-lens/` 已加入 `.gitignore`。如果你新增其他本地产生的文件，请同步加入 `.gitignore`，避免误提交密钥或运行数据。
+
 ### Configuration Options
 
 - `chains`: Array of chains to monitor. Use `"type": "solana"` or `"type": "evm"`.
@@ -178,6 +182,22 @@ cp config.example.json config.json
   - `include_tokens`: Array of token addresses to specifically monitor (used with `whitelist` mode)
   - `exclude_tokens`: Array of token addresses to ignore (used with `blacklist` mode)
   - `tokens`: EVM/BSC token contracts to query. Standard RPC cannot reliably discover every BEP-20 token automatically, so BSC tokens should be listed here.
+
+### Alpha 代币流向通知
+
+对 `scan.tokens` 中配置的 EVM/BSC Token，监控会读取总供应量与被监控钱包余额。余额变化达到 `alerts.significant_change` 后，还会通过当前 RPC 查询最近的 ERC-20 `Transfer` 记录，尽量匹配造成这次余额变化的真实交易。Console、Telegram、Discord 通知会显示：
+
+- Token 名称
+- 流向：`流入` 或 `流出`
+- 变动数量
+- 初始持仓占比与当前持仓占比
+- 变化百分比
+- 匹配到链上记录时显示发送地址、接收地址与 `hashTx`
+- 被监控钱包地址、Token 合约地址与链名称
+
+该功能只使用已配置的 RPC。RPC URL、Telegram token、Discord webhook 仍放在 `.env`。为兼容 QuickNode Discover 等限制 `eth_getLogs` 查询范围的 RPC，默认只查询最近 5 个区块；如果交易不在最近查询范围内，通知仍会发送余额变化提醒，并标记为未匹配到最近交易。
+
+在 Web UI 主界面点击某个 Token，界面会切换为左右两栏布局：左侧（约 40%）保持持仓列表，右侧（约 60%）展开实时追踪面板并吸附在视口内可独立滚动。追踪面板每 15 秒刷新一次该钱包在该 Token 上最近区块内的链上交易，并同步刷新余额与持仓占比；如果变化达到提醒阈值，面板会高亮显示，同时发送已启用的 Console、Telegram、Discord 通知。更长历史范围需要使用允许更大 `eth_getLogs` 区块范围的 RPC。
 
 ### Scan Mode Examples
 
@@ -241,7 +261,7 @@ make build
 go run cmd/monitor/main.go config-ui -config config.json
 ```
 
-Then open `http://127.0.0.1:8787` in your browser. The UI now separates monitoring and configuration: the main page reads `data/wallet_data.json` and shows monitored addresses, current holdings, estimated USD value, and the latest scan time. Balance-change history is produced by comparing consecutive scans and sent through the configured alert channels. All editable settings live under the “配置” page, including chains, RPC, wallets, token contracts, thresholds, Discord, and Telegram settings. Environment-variable placeholders such as `${BSC_RPC_URL}` and `${TELEGRAM_BOT_TOKEN}` are only shown inside the configuration form, avoiding misleading values on the main monitoring page.
+Then open `http://127.0.0.1:8787` in your browser. The UI now separates monitoring and configuration: the main page reads `data/wallet_data.json` and shows monitored addresses, current holdings, estimated USD value, and the latest scan time. Balance-change history is produced by comparing consecutive scans and sent through the configured alert channels. All editable settings live under the “配置” page, including chains, RPC, wallets, token contracts, thresholds, Discord, and Telegram settings. Wallet addresses and Token contract whitelist entries support multiple lines; use one address or one `address,symbol,decimals` Token entry per line. Environment-variable placeholders such as `${BSC_RPC_URL}` and `${TELEGRAM_BOT_TOKEN}` are only shown inside the configuration form, avoiding misleading values on the main monitoring page.
 
 The configuration UI can trigger an on-demand scan from the main page. Click “立即扫描” to call `/api/scan`; the backend loads the current `config.json`, scans all configured chains/wallets, writes `data/wallet_data.json`, and returns the updated holdings to the dashboard.
 

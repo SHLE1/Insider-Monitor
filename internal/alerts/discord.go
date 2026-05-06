@@ -87,6 +87,27 @@ func (d *DiscordAlerter) SendAlert(alert Alert) error {
 							alert.TokenMint),
 						Inline: false,
 					})
+					if txHash, ok := safeGet("tx_hash").(string); ok && txHash != "" {
+						fields = append(fields, field{
+							Name:   "hashTx",
+							Value:  fmt.Sprintf("`%s`", txHash),
+							Inline: false,
+						})
+					}
+					if fromAddress, ok := safeGet("from_address").(string); ok && fromAddress != "" {
+						fields = append(fields, field{
+							Name:   "发送地址",
+							Value:  fmt.Sprintf("`%s`", fromAddress),
+							Inline: false,
+						})
+					}
+					if toAddress, ok := safeGet("to_address").(string); ok && toAddress != "" {
+						fields = append(fields, field{
+							Name:   "接收地址",
+							Value:  fmt.Sprintf("`%s`", toAddress),
+							Inline: false,
+						})
+					}
 				}
 			}
 		}

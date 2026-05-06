@@ -106,6 +106,8 @@ func derefScanConfig(scanConfig *config.ScanConfig) config.ScanConfig {
 type TokenAccountInfo struct {
 	Balance         uint64    `json:"balance"`
 	RawBalance      string    `json:"raw_balance,omitempty"`
+	TotalSupplyRaw  string    `json:"total_supply_raw,omitempty"`
+	HoldingPercent  float64   `json:"holding_percent,omitempty"`
 	LastUpdated     time.Time `json:"last_updated"`
 	Symbol          string    `json:"symbol"`
 	Decimals        uint8     `json:"decimals"`
@@ -330,6 +332,13 @@ type Change struct {
 	OldBalance    uint64
 	NewBalance    uint64
 	ChangePercent float64
+	AmountChanged uint64
+	Direction     string
+	OldHoldingPct float64
+	NewHoldingPct float64
+	TxHash        string
+	FromAddress   string
+	ToAddress     string
 	TokenBalances map[string]uint64 `json:",omitempty"`
 }
 
@@ -472,6 +481,12 @@ func DetectChanges(oldData, newData map[string]*WalletData, significantChange fl
 			absChange := abs(pctChange)
 
 			if absChange >= significantChange {
+				amountChanged := newInfo.Balance - oldInfo.Balance
+				direction := "流入"
+				if newInfo.Balance < oldInfo.Balance {
+					amountChanged = oldInfo.Balance - newInfo.Balance
+					direction = "流出"
+				}
 				changes = append(changes, Change{
 					ChainName:     newWalletData.ChainName,
 					ChainType:     newWalletData.ChainType,
@@ -483,6 +498,10 @@ func DetectChanges(oldData, newData map[string]*WalletData, significantChange fl
 					OldBalance:    oldInfo.Balance,
 					NewBalance:    newInfo.Balance,
 					ChangePercent: pctChange,
+					AmountChanged: amountChanged,
+					Direction:     direction,
+					OldHoldingPct: oldInfo.HoldingPercent,
+					NewHoldingPct: newInfo.HoldingPercent,
 				})
 			}
 		}

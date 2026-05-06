@@ -34,6 +34,9 @@ vendor/
 config.json
 *.log
 
+# Local agent/tooling state
+.pi-lens/
+
 # OS specific
 .DS_Store
 Thumbs.db

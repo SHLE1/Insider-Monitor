@@ -3,6 +3,7 @@ package alerts
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/accursedgalaxy/insider-monitor/internal/utils"
 )
@@ -11,6 +12,10 @@ import (
 type ConsoleAlerter struct{}
 
 func (a *ConsoleAlerter) SendAlert(alert Alert) error {
+	if alert.AlertType == "balance_change" {
+		fmt.Println(formatConsoleAlphaAlert(alert))
+		return nil
+	}
 	// Use colors based on alert level
 	var color, symbol string
 	switch alert.Level {
@@ -90,4 +95,66 @@ func (a *ConsoleAlerter) SendAlert(alert Alert) error {
 	fmt.Println(bottomBorder)
 
 	return nil
+}
+
+func formatConsoleAlphaAlert(alert Alert) string {
+	if alert.Data == nil {
+		return alert.Message
+	}
+	symbol, _ := alert.Data["symbol"].(string)
+	direction, _ := alert.Data["direction"].(string)
+	amount, _ := alert.Data["amount_changed"].(uint64)
+	decimals, _ := alert.Data["decimals"].(uint8)
+	changePercent, _ := alert.Data["change_percent"].(float64)
+	oldHoldingPct, _ := alert.Data["old_holding_pct"].(float64)
+	newHoldingPct, _ := alert.Data["new_holding_pct"].(float64)
+	fromAddress, _ := alert.Data["from_address"].(string)
+	toAddress, _ := alert.Data["to_address"].(string)
+	txHash, _ := alert.Data["tx_hash"].(string)
+	status := "🟢"
+	if direction == "流出" || changePercent < 0 {
+		status = "🔴"
+	}
+	if fromAddress == "" {
+		fromAddress = alert.WalletAddress
+	}
+	if toAddress == "" {
+		toAddress = alert.WalletAddress
+	}
+	if txHash == "" {
+		txHash = "未匹配到最近交易"
+	}
+	return fmt.Sprintf("[TG] 代币名称 %s\n\n%s (UTC+8)\n\n代币检测 %s %s %s\n\n📊 initAmount %.4f%% | currentAmount %.4f%%\n\n变动总量 %s %.2f%% / %.2f%%\n\n发送地址：%s\n类型：%s\n\n接收地址：%s\n类型：%s\n\nToken：%s\n链：%s\nhashTx：%s",
+		symbol,
+		alert.Timestamp.In(time.FixedZone("UTC+8", 8*60*60)).Format("2006-01-02 15:04:05"),
+		status,
+		direction,
+		utils.FormatTokenAmount(amount, decimals),
+		oldHoldingPct,
+		newHoldingPct,
+		status,
+		changePercent,
+		absConsoleFloat(changePercent),
+		fromAddress,
+		consoleAddressType(fromAddress, alert.WalletAddress),
+		toAddress,
+		consoleAddressType(toAddress, alert.WalletAddress),
+		alert.TokenMint,
+		alert.ChainName,
+		txHash,
+	)
+}
+
+func consoleAddressType(address, watchedWallet string) string {
+	if strings.EqualFold(address, watchedWallet) {
+		return "监控钱包"
+	}
+	return "链上地址"
+}
+
+func absConsoleFloat(value float64) float64 {
+	if value < 0 {
+		return -value
+	}
+	return value
 }
